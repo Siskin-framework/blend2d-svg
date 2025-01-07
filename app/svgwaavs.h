@@ -1,13 +1,17 @@
 #pragma once
 
-#include "svg/svgstructuretypes.h"
-
-#include "screensnapshot.h"
-#include "gmonitor.h"
-
 
 #include <memory>
 #include <vector>
+
+
+#include "svgstructuretypes.h"
+
+#include "screensnapshot.h"
+#include "gmonitor.h"
+#include "converters.h"
+
+
 
 
 namespace waavs {
@@ -18,14 +22,15 @@ namespace waavs {
 	// Return value as variant(), and it can be used in all 
 	// the same places a SVGImage can be used 
 	//
-	struct DisplayCaptureElement : public SVGVisualNode
+	struct DisplayCaptureElement : public SVGGraphicsElement
 	{
 		static void registerFactory() {
-			gShapeCreationMap["displayCapture"] = [](IAmGroot* root, const XmlElement& elem) {
-				auto node = std::make_shared<DisplayCaptureElement>(root);
-				node->loadFromXmlElement(elem);
-				return node;
-			};
+			registerSVGSingularNode("displayCapture",
+				[](IAmGroot* groot, const XmlElement& elem) {
+					auto node = std::make_shared<DisplayCaptureElement>(groot);
+					node->loadFromXmlElement(elem, groot);
+					return node;
+				});
 		}
 
 
@@ -51,12 +56,15 @@ namespace waavs {
 
 
 
-		DisplayCaptureElement(IAmGroot* aroot) :SVGVisualNode(aroot) {}
+		DisplayCaptureElement(IAmGroot* ) 
+			:SVGGraphicsElement() {}
 
-		const BLVar& getVariant() override
+		const BLVar getVariant(IRenderSVG *ctx, IAmGroot *groot) noexcept override
 		{
 			if (fVar.isNull())
 			{
+				bindToContext(ctx, groot);
+				
 				fSnapper.update();
 				fPattern.setImage(fSnapper.getImage());
 				fVar.assign(fPattern);
@@ -65,11 +73,44 @@ namespace waavs {
 			return fVar;
 		}
 
-
-		void bindToGroot(IAmGroot* groot) override
+		void fixupSelfStyleAttributes(IRenderSVG* , IAmGroot* ) override
 		{
-			SVGVisualNode::bindToGroot(groot);
+			fSrcSpan = getAttribute("src");
 
+			parse64i(getAttribute("capX"), fCapX);
+			parse64i(getAttribute("capY"), fCapY);
+			parse64i(getAttribute("capWidth"), fCapWidth);
+			parse64i(getAttribute("capHeight"), fCapHeight);
+		}
+		
+		void bindSelfToContext(IRenderSVG *ctx, IAmGroot* groot) override
+		{
+
+			// We need to resolve the size of the user space
+			// start out with some information from groot
+			double dpi = 96;
+			double w = 1.0;
+			double h = 1.0;
+
+			// The width and height can default to the size of the canvas
+			// we are rendering to.
+			if (nullptr != groot)
+			{
+				dpi = groot->dpi();
+			}
+
+
+			BLRect cFrame = ctx->localFrame();
+			w = cFrame.w;
+			h = cFrame.h;
+
+
+			fDimX.loadFromChunk(getAttribute("x"));
+			fDimY.loadFromChunk(getAttribute("y"));
+			fDimWidth.loadFromChunk(getAttribute("width"));
+			fDimHeight.loadFromChunk(getAttribute("height"));
+			
+			
 			// BUGBUG - need to get the dpi and canvas size to calculate these properly
 			fX = fDimX.calculatePixels();
 			fY = fDimY.calculatePixels();
@@ -82,8 +123,8 @@ namespace waavs {
 				auto displayName = toString(fSrcSpan);
 
 				// Setup the screen snapper
-				auto dc = DisplayMonitor::createDC(displayName.c_str());
-
+				HDC dc = DisplayMonitor::createDC(displayName.c_str());
+				
 				// BUGBUG
 				// If capture width has not been set, then get it from 
 				// the DC
@@ -102,48 +143,22 @@ namespace waavs {
 			if (!fDimHeight.isSet())
 				fHeight = (double)fSnapper.height();
 
+			fSnapper.update();
 		}
 
-		void loadVisualProperties(const XmlAttributeCollection& attrs) override
-		{
-			SVGVisualNode::loadVisualProperties(attrs);
-
-			if (attrs.getAttribute("src"))
-				fSrcSpan = attrs.getAttribute("src");
-
-			if (attrs.getAttribute("capX"))
-				fCapX = toInteger(attrs.getAttribute("capX"));
-			if (attrs.getAttribute("capY"))
-				fCapY = toInteger(attrs.getAttribute("capY"));
-			if (attrs.getAttribute("capWidth"))
-				fCapWidth = toInteger(attrs.getAttribute("capWidth"));
-			if (attrs.getAttribute("capHeight"))
-				fCapHeight = toInteger(attrs.getAttribute("capHeight"));
-
-			if (attrs.getAttribute("x"))
-				fDimX.loadFromChunk(attrs.getAttribute("x"));
-			if (attrs.getAttribute("y"))
-				fDimY.loadFromChunk(attrs.getAttribute("y"));
-			if (attrs.getAttribute("width"))
-				fDimWidth.loadFromChunk(attrs.getAttribute("width"));
-			if (attrs.getAttribute("height"))
-				fDimHeight.loadFromChunk(attrs.getAttribute("height"));
-
-		}
 		
-		void update() override
+		void updateSelf(IAmGroot* ) override
 		{
 			fSnapper.update();
 		}
 		
-		void drawSelf(IRenderSVG *ctx)
-		{
+		void drawSelf(IRenderSVG* ctx, IAmGroot* ) override
+		{	
 			int lWidth = (int)fSnapper.width();
 			int lHeight = (int)fSnapper.height();
 
 			ctx->scaleImage(this->fSnapper.getImage(), 0, 0, lWidth, lHeight, fX, fY, fWidth, fHeight);
 			ctx->flush();
-
 		}
 		
 	};

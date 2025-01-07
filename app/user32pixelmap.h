@@ -22,7 +22,7 @@
 
 #include "maths.h"
 #include "pixelaccessor.h"
-#include "blend2d/blend2d.h"
+
 
 namespace waavs {
     // Used to rapidly copy 32 bit values 
@@ -117,7 +117,8 @@ namespace waavs {
 
             // select the DIBSection into the memory context so we can 
             // peform GDI operations with it
-            auto bitmapobj = ::SelectObject(fBitmapDC, fDIBHandle);
+            //auto bitmapobj = ::SelectObject(fBitmapDC, fDIBHandle);
+            ::SelectObject(fBitmapDC, fDIBHandle);
 
 
             return true;

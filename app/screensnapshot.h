@@ -34,6 +34,9 @@
 
 
 #include "User32PixelMap.h"
+#include "stopwatch.h"
+
+
 
 
 class ScreenSnapper : public waavs::User32PixelMap
@@ -45,7 +48,11 @@ class ScreenSnapper : public waavs::User32PixelMap
     int fCapWidth = 0;
     int fCapHeight = 0;
     
-
+    // Capture throttling
+    waavs::StopWatch fTimer;
+	double fMinInterval = 0.0;
+    double fLastCaptureTime = 0;
+    
     BLImage fImage{};
 
 public:
@@ -88,9 +95,18 @@ public:
         int lWidth = (int)width();
         int lHeight = (int)height();
         intptr_t lStride = (intptr_t)stride();
-        BLResult bResult = blImageInitAsFromData(&fImage, lWidth, lHeight, BL_FORMAT_PRGB32, data(), lStride, BLDataAccessFlags::BL_DATA_ACCESS_RW, nullptr, nullptr);
+        blImageInitAsFromData(&fImage, lWidth, lHeight, BL_FORMAT_PRGB32, data(), lStride, BLDataAccessFlags::BL_DATA_ACCESS_RW, nullptr, nullptr);
+
+        setMaxFrameRate(15);
+        fLastCaptureTime = 0;
+
     }
 
+    void setMaxFrameRate(double fps)
+    {
+		fMinInterval = (1.0 / fps);
+    }
+    
     const BLImage& getImage() const
     {
         return fImage;
@@ -99,10 +115,16 @@ public:
     // take a snapshot
     bool update()
     {
+        // get current time
+		double currentTime = fTimer.seconds();
+		double currentInterval = currentTime - fLastCaptureTime;
+		if (currentInterval < fMinInterval)
+			return false;
+        
         int lWidth = (int)width();
         int lHeight = (int)height();
         
-		auto bResult = StretchBlt(bitmapDC(), 0, 0, lWidth, lHeight, fSourceDC, fCapX, fCapY, fCapWidth, fCapHeight, SRCCOPY | CAPTUREBLT);
+		auto bResult = ::StretchBlt(bitmapDC(), 0, 0, lWidth, lHeight, fSourceDC, fCapX, fCapY, fCapWidth, fCapHeight, SRCCOPY | CAPTUREBLT);
 
         if (bResult == 0)
         {
@@ -110,6 +132,8 @@ public:
             printf("ScreenSnapper::next(), ERROR: 0x%x\n", err);
         }
 
+        fLastCaptureTime = currentTime;
+        
         return (bResult != 0);
     }
 };

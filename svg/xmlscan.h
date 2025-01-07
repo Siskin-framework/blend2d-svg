@@ -30,10 +30,7 @@
 //
 
 
-#include <unordered_map>
 #include <string>
-#include <sstream>
-#include <optional>
 
 #include "bspan.h"
 
@@ -43,7 +40,9 @@ namespace waavs {
     static charset xmlwsp(" \t\r\n\f\v");
     static charset xmlalpha("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
     static charset xmldigit("0123456789");
+}
 
+namespace waavs {
     
     enum XML_ELEMENT_TYPE {
         XML_ELEMENT_TYPE_INVALID = 0
@@ -60,107 +59,16 @@ namespace waavs {
 		, XML_ELEMENT_TYPE_ENTITY                       // <!ENTITY hello "Hello">
     };
     
+ 
 
-	static std::string expandStandardEntities(const ByteSpan &inSpan)
-	{
-        std::ostringstream oss;
-        
-		for (auto it = inSpan.begin(); it != inSpan.end(); ++it)
-		{
-			if (*it == '&')
-			{
-				auto next = it + 1;
-				if (next == inSpan.end())
-					break;
-
-				if (*next == '#')
-				{
-					auto next2 = next + 1;
-					if (next2 == inSpan.end())
-						break;
-
-					if (*next2 == 'x')
-					{
-						auto next3 = next2 + 1;
-						if (next3 == inSpan.end())
-							break;
-
-						auto end = next3;
-						while (end != inSpan.end() && isxdigit(*end))
-							++end;
-
-						if (end == inSpan.end())
-							break;
-
-						if (*end != ';')
-							break;
-
-						std::string hexStr(next3, end);
-						int hexVal = std::stoi(hexStr, nullptr, 16);
-						oss << (char)hexVal;
-
-						it = end;
-					}
-					else
-					{
-						auto end = next2;
-						while (end != inSpan.end() && isdigit(*end))
-							++end;
-
-						if (end == inSpan.end())
-							break;
-
-						if (*end != ';')
-							break;
-
-						std::string decStr(next2, end);
-						int decVal = std::stoi(decStr, nullptr, 10);
-						oss << (char)decVal;
-
-						it = end;
-					}
-				}
-				else
-				{
-					auto end = next;
-					while (end != inSpan.end() && isalnum(*end))
-						++end;
-
-					if (end == inSpan.end())
-						break;
-
-					if (*end != ';')
-						break;
-
-					std::string entity(next, end);
-					if (entity == "lt")
-						oss << '<';
-					else if (entity == "gt")
-						oss << '>';
-					else if (entity == "amp")
-						oss << '&';
-					else if (entity == "apos")
-						oss << '\'';
-					else if (entity == "quot")
-						oss << '"';
-					else
-						break;
-
-					it = end;
-				}
-			}
-			else
-			{
-                if (*it != '\r' && *it != '\n') {
-                    oss << *it;
-                }
-			}
-		}
-
-		return oss.str();
-	}
-    
-    static bool readQuoted(ByteSpan &src, ByteSpan &dataChunk)
+    //
+    // readQuoted()
+    // 
+	// Read a quoted string from the input stream
+	// Read a first quote, then use that as the delimiter
+    // to read to the end of the string
+    //
+    static bool readQuoted(ByteSpan &src, ByteSpan &dataChunk) noexcept
     {
         uint8_t* beginattrValue = nullptr;
         uint8_t* endattrValue = nullptr;
@@ -199,9 +107,9 @@ namespace waavs {
     // readCData()
     //============================================================
 
-    static bool readCData(ByteSpan& src, ByteSpan& dataChunk)
+    static bool readCData(ByteSpan& src, ByteSpan& dataChunk) noexcept
     {
-        // Skip past the <![CDATA[
+        // Skip past the ![CDATA[
         src += 8;
 
         dataChunk = src;
@@ -222,10 +130,10 @@ namespace waavs {
     //============================================================
     // readComment()
     //============================================================
-    static bool readComment(ByteSpan &src, ByteSpan &dataChunk)
+    static bool readComment(ByteSpan &src, ByteSpan &dataChunk) noexcept
 	{
-		// Skip past the <!--
-		src += 4;
+		// Skip past the !--
+		src += 3;
 
 		dataChunk = src;
 		dataChunk.fEnd = src.fStart;
@@ -248,23 +156,18 @@ namespace waavs {
     // !ENTITY  name 'quoted value' >
     // Return a name and value
 	//============================================================
-    static bool readEntityDeclaration(ByteSpan& src, ByteSpan& name, ByteSpan &value)
+    static bool readEntityDeclaration(ByteSpan& src, ByteSpan& dataChunk) noexcept
     {
         // Skip past the !ENTITY
 		src += 7;
 
-		// Get the name of the entity
-		name = chunk_token(src, xmlwsp);
-        
-		// Skip past the whitespace
-		src = chunk_ltrim(src, xmlwsp);
+        dataChunk = src;
 
-		// Get the value of the entity from a quoted string
-		readQuoted(src, value);
-        
 		// skip until we see the closing '>' character
 		src = chunk_find_char(src, '>');
-        
+
+        dataChunk.fEnd = src.fStart;
+
         // skip past that character and return
 		src++;
 
@@ -277,11 +180,11 @@ namespace waavs {
     // fSource is currently sitting at the beginning of !DOCTYPE
     // Note: https://www.tutorialspoint.com/xml/xml_dtds.htm
     //============================================================
-    static bool readDoctype(ByteSpan& src, ByteSpan& dataChunk)
+    static bool readDoctype(ByteSpan& src, ByteSpan& dataChunk) noexcept
     {
         // skip past the !DOCTYPE to the first whitespace character
-        while (src && !xmlwsp[*src])
-            src++;
+        src += 8;
+
 
         // Skip past the whitespace
         // to get to the beginning of things
@@ -313,7 +216,7 @@ namespace waavs {
         // If we've gotten here, we have an 'external' DTD
 		// It can either be a SYSTEM or PUBLIC DTD
         // First check for a PUBLIC DTD
-		if (chunk_starts_with(src, "PUBLIC"))
+		if (src.startsWith("PUBLIC"))
 		{
 			// Skip past the PUBLIC
 			src += 6;
@@ -331,6 +234,9 @@ namespace waavs {
 			if (*src == '>')
 			{
 				src++;
+                dataChunk.fStart = src.fStart;
+				dataChunk.fEnd = src.fStart;
+                
 				return true;
 			}
 
@@ -350,7 +256,7 @@ namespace waavs {
 				return true;
 			}
 		}
-		else if (chunk_starts_with(src, "SYSTEM"))
+		else if (src.startsWith("SYSTEM"))
 		{
 			// Skip past the SYSTEM
 			src += 6;
@@ -393,118 +299,38 @@ namespace waavs {
     // readTag()
     //============================================================
 
-    static bool readTag(ByteSpan& src, ByteSpan& dataChunk)
+    static bool readTag(ByteSpan& src, ByteSpan& dataChunk) noexcept
     {
+        const unsigned char* srcPtr = src.fStart;
+		const unsigned char* endPtr = src.fEnd;
+        
         dataChunk = src;
         dataChunk.fEnd = src.fStart;
 
-        while (src && *src != '>')
-            src++;
-
-        dataChunk.fEnd = src.fStart;
+		while ((srcPtr < endPtr) && (*srcPtr != '>'))
+			srcPtr++;
+        
+		// if we get to the end of the input, before seeing the closing '>'
+        // the we return false, indicating we did not read
+        if (srcPtr == endPtr)
+			return false;
+        
+        // we did see the closing, so capture the name into 
+        // the data chunk, and trim whitespace off the end.
+        dataChunk.fEnd = srcPtr;
         dataChunk = chunk_rtrim(dataChunk, xmlwsp);
 
-        // Get past the '>' if it was there
-        src++;
+        // move past the '>'
+        srcPtr++;
+        src.fStart = srcPtr;
+
 
         return true;
     }
 
-    // Attributes are separated by '=' and values are quoted with 
-    // either "'" or '"'
-    // alters the src so it points past the end of the retrieved value
-    // Typical of xml attributes
-    static bool nextAttributeKeyValue(ByteSpan& src, ByteSpan& key, ByteSpan& value)
-    {
-        // Zero these out in case there is failure
-        key = {};
-        value = {};
 
-        static charset equalChars("=");
-        static charset quoteChars("\"'");
-
-        bool start = false;
-        bool end = false;
-        uint8_t quote{};
-
-        uint8_t* beginattrValue = nullptr;
-        uint8_t* endattrValue = nullptr;
-
-
-        // Skip leading white space before the key name
-        src = chunk_ltrim(src, xmlwsp);
-
-        if (!src)
-            return false;
-
-        // Special case of running into an end tag
-        if (*src == '/') {
-            end = true;
-            return false;
-        }
-
-        // Find end of the attrib name.
-        auto attrNameChunk = chunk_token(src, equalChars);
-        key = chunk_trim(attrNameChunk, xmlwsp);
-
-        // Skip stuff past '=' until we see one of our quoteChars
-        while (src && !quoteChars[*src])
-            src++;
-
-        // If we've run out of input, return false
-        if (!src)
-            return false;
-
-        // capture the quote character
-        quote = *src;
-
-        // move past the beginning of the quote
-        // and mark the beginning of the value portion
-        src++;
-        beginattrValue = (uint8_t*)src.fStart;
-
-        // Skip anything that is not the quote character
-        // to mark the end of the value
-        // don't use quoteChars here, because it's valid to 
-        // embed the other quote within the value
-        while (src && *src != quote)
-            src++;
-
-        // If we still have input, it means we found
-        // the quote character, so mark the end of the
-        // value
-        if (src)
-        {
-            endattrValue = (uint8_t*)src.fStart;
-            src++;
-        }
-        else {
-            // We did not find the closing quote
-            // so we don't have a valid value
-            return false;
-        }
-
-
-        // Store only well formed attributes
-        value = { beginattrValue, endattrValue };
-
-        return true;
-    }
     
-	static bool gatherXmlAttributes(const ByteSpan& inChunk, std::unordered_map<std::string, ByteSpan>& outAttributes)
-	{
-		ByteSpan src = inChunk;
-		ByteSpan key;
-		ByteSpan value;
 
-		while (nextAttributeKeyValue(src, key, value))
-		{
-			std::string keyStr((const char*)key.fStart, key.size());
-			outAttributes[keyStr] = value;
-		}
-
-		return true;
-	}
 }
 
 
@@ -517,14 +343,16 @@ struct XmlName {
     ByteSpan fNamespace{};
     ByteSpan fName{};
 
-    XmlName() = default;
+    constexpr XmlName() noexcept = default;
 
     XmlName(const ByteSpan& inChunk)
     {
         reset(inChunk);
     }
 
-    XmlName(const XmlName& other) :fNamespace(other.fNamespace), fName(other.fName) {}
+    XmlName(const XmlName& other) noexcept
+        :fNamespace(other.fNamespace), 
+        fName(other.fName) {}
 
     XmlName& operator =(const XmlName& rhs)
     {
@@ -537,7 +365,7 @@ struct XmlName {
     {
         fName = inChunk;
         fNamespace = chunk_token(fName, charset(':'));
-        if (chunk_size(fName) < 1)
+        if (fName.size() < 1)
         {
             fName = fNamespace;
             fNamespace = {};
@@ -545,6 +373,10 @@ struct XmlName {
         return *this;
     }
 
+    // fqname
+    // Fully Qualified Name
+    // This is the namespace, plus the basic name
+    // as a std::string
     std::string fqname() const {
 		if (fNamespace.size() > 0)
 			return std::string((const char*)fNamespace.fStart, fNamespace.size()) + ":" + std::string((const char*)fName.fStart, fName.size());
@@ -552,88 +384,24 @@ struct XmlName {
 			return std::string((const char*)fName.fStart, fName.size());
     }
     
-    ByteSpan name() const { return fName; }
-    ByteSpan ns() const { return fNamespace; }
+    ByteSpan name() const noexcept { return fName; }         // The name
+    ByteSpan ns() const noexcept { return fNamespace; }      // The namespace
 };
 }
 
-namespace waavs {
-	//============================================================
-    // XmlAttributeCollection
-    // A collection of the attibutes found on an XmlElement
-    //============================================================
-    
-    struct XmlAttributeCollection
-    {
-        std::unordered_map<std::string, ByteSpan> fAttributes{};
 
-        XmlAttributeCollection() = default;
-        XmlAttributeCollection(const XmlAttributeCollection& other)
-            :fAttributes(other.fAttributes)
-        {}
-        
-        XmlAttributeCollection(const ByteSpan& inChunk)
-        {
-            scanAttributes(inChunk);
-        }
-        
-        // Return a const attribute collection
-	    const std::unordered_map<std::string, ByteSpan>& attributes() const { return fAttributes; }
-        
-		size_t size() const { return fAttributes.size(); }
-        
-		virtual void clear() { fAttributes.clear(); }
-        
-        bool scanAttributes(const ByteSpan& inChunk)
-        {
-            return gatherXmlAttributes(inChunk, fAttributes);
-        }
-        
-        bool hasAttribute(const std::string& inName) const
-		{
-			return fAttributes.find(inName) != fAttributes.end();
-		}
-        
-		// Add a single attribute to our collection of attributes
-        // if the attribute already exists, replace its value
-        // with the new value
-        void addAttribute(const std::string& name, const ByteSpan& valueChunk)
-        {
-            fAttributes[name] = valueChunk;
-        }
 
-        //std::optional<ByteSpan> 
-        ByteSpan getAttribute(const std::string& name) const
-        {
-            auto it = fAttributes.find(name);
-            if (it != fAttributes.end())
-                return it->second;
-            else
-                return ByteSpan{};
-            
-                //return std::nullopt;
-        }
-
-        XmlAttributeCollection & mergeProperties(const XmlAttributeCollection & other)
-        {
-            for (auto& attr : other.fAttributes)
-            {
-            	fAttributes[attr.first] = attr.second;
-            }
-            return *this;
-        }
-        
-    };
-}
 
 namespace waavs {
 
     // Representation of an xml element
     // The xml scanner will generate these
-    struct XmlElement //: public XmlAttributeCollection
+    struct XmlElement
     {
     private:
         int fElementKind{ XML_ELEMENT_TYPE_INVALID };
+
+        
         ByteSpan fNameSpan{};
         ByteSpan fData{};
         XmlName fXmlName{};
@@ -674,17 +442,17 @@ namespace waavs {
 
             return fNameSpan;
         }
-        
+
     public:
         XmlElement() {}
-		XmlElement(const XmlElement& other)
-			:fElementKind(other.fElementKind), 
-            fNameSpan(other.fNameSpan), 
+        XmlElement(const XmlElement& other)
+            :fElementKind(other.fElementKind),
+            fNameSpan(other.fNameSpan),
             fData(other.fData),
             fXmlName(other.fXmlName)
-		{
-		}
-        
+        {
+        }
+
         XmlElement(int kind, const ByteSpan& data)
             :fElementKind(kind)
             , fData(data)
@@ -720,31 +488,32 @@ namespace waavs {
 
         // Clear this element to a default state
         virtual void clear()
-        {   
-			fXmlName.reset({});
+        {
+            fXmlName.reset({});
             fElementKind = XML_ELEMENT_TYPE_INVALID;
-            fData = {};
+            fData.reset();
         }
 
         // determines whether the element is currently empty
-        bool isEmpty() const { return fElementKind == XML_ELEMENT_TYPE_INVALID; }
+        constexpr bool isEmpty() const { return fElementKind == XML_ELEMENT_TYPE_INVALID; }
 
         explicit operator bool() const { return !isEmpty(); }
 
         // Returning information about the element
-		ByteSpan nameSpan() const { return fNameSpan; }
-		XmlName xmlName() const { return fXmlName; }
-		ByteSpan tagName() const { return fXmlName.name(); }
-		ByteSpan tagNamespace() const { return fXmlName.ns(); }
-		std::string name() const { return std::string(fXmlName.name().fStart, fXmlName.name().fEnd); }
-        
+        ByteSpan nameSpan() const { return fNameSpan; }
+        XmlName xmlName() const { return fXmlName; }
+        ByteSpan tagName() const { return fXmlName.name(); }
+        ByteSpan tagNamespace() const { return fXmlName.ns(); }
+        ByteSpan name() const { return fXmlName.name(); }
+
         int kind() const { return fElementKind; }
-        void setKind(int kind) { fElementKind = kind; }
+        void setKind(const int kind) { fElementKind = kind; }
 
         ByteSpan data() const { return fData; }
 
 
         // Convenience for what kind of tag it is
+		bool isXmlDecl() const { return fElementKind == XML_ELEMENT_TYPE_XMLDECL; }
         bool isStart() const { return (fElementKind == XML_ELEMENT_TYPE_START_TAG); }
         bool isSelfClosing() const { return fElementKind == XML_ELEMENT_TYPE_SELF_CLOSING; }
         bool isEnd() const { return fElementKind == XML_ELEMENT_TYPE_END_TAG; }
@@ -753,49 +522,37 @@ namespace waavs {
         bool isContent() const { return fElementKind == XML_ELEMENT_TYPE_CONTENT; }
         bool isCData() const { return fElementKind == XML_ELEMENT_TYPE_CDATA; }
         bool isDoctype() const { return fElementKind == XML_ELEMENT_TYPE_DOCTYPE; }
-
+		bool isEntityDeclaration() const { return fElementKind == XML_ELEMENT_TYPE_ENTITY; }
     };
-
-   
-    struct XmlNode : public XmlElement, public XmlAttributeCollection
-    {
-        virtual bool loadProperties(const XmlAttributeCollection& attrs)
-        {
-            return false;
-        }
-        
-        virtual void loadFromXmlElement(const XmlElement& elem)
-        {
-			// First assign
-            XmlElement::operator=(elem);
-            
-            scanAttributes(elem.data());
-            loadProperties(*this);
-        }
-    };
-        
 }
-
 
 // 
 // The XmlElementIterator is used to iterate over the elements in a chunk of memory.
 //
 namespace waavs {
-    // XML Iterator States
+    // XML_ITERATOR_STATE
+    // An enumeration that represents the control
+    // state of the iterator
     enum XML_ITERATOR_STATE {
         XML_ITERATOR_STATE_CONTENT = 0
         , XML_ITERATOR_STATE_START_TAG
 
     };
     
+    // XmlIteratorParams
+    // The set of parameters that configure how the iterator
+    // will operate
     struct XmlIteratorParams {
         bool fSkipComments = true;
-        bool fSkipProcessingInstructions = true;
+        bool fSkipProcessingInstructions = false;
         bool fSkipWhitespace = true;
-        bool fSkipCData = true;
+        bool fSkipCData = false;
         bool fAutoScanAttributes = false;
     };
 
+	// XmlIteratorState
+    // The information needed for the iterator to continue
+    // after it has returned a value.
     struct XmlIteratorState {
         int fState{ XML_ITERATOR_STATE_CONTENT };
         ByteSpan fSource{};
@@ -804,10 +561,12 @@ namespace waavs {
     
     // XmlElementGenerator
     // A function to get the next element in an iteration
-    static XmlElement XmlElementGenerator(const XmlIteratorParams& params, XmlIteratorState& st)
+    static bool XmlElementGenerator(const XmlIteratorParams& params, XmlIteratorState& st, XmlElement &elem)
     {
-        XmlElement elem{};
+        elem.clear();
+        //XmlElement elem{};
 
+        
         while (st.fSource)
         {
             switch (st.fState)
@@ -828,7 +587,10 @@ namespace waavs {
                         // collapse whitespace
                         // if the content is all whitespace
                         // don't return anything
-                        content = chunk_trim(content, xmlwsp);
+                        // BUGBUG - deal with XML preserve whitespace
+                        if (params.fSkipWhitespace)
+                            content = chunk_trim(content, xmlwsp);
+                        
                         if (content)
                         {
                             // Set the state for next iteration
@@ -836,7 +598,7 @@ namespace waavs {
                             st.fMark = st.fSource;
                             elem.reset(XML_ELEMENT_TYPE_CONTENT, content);
 
-                            return elem;
+                            return !elem.isEmpty();
                         }
                     }
 
@@ -856,32 +618,37 @@ namespace waavs {
                 elementChunk.fEnd = st.fSource.fStart;
                 int kind = XML_ELEMENT_TYPE_START_TAG;
 
-                if (chunk_starts_with_cstr(st.fSource, "?xml"))
+                if (st.fSource.startsWith("?xml"))
                 {
                     kind = XML_ELEMENT_TYPE_XMLDECL;
                     readTag(st.fSource, elementChunk);
                 }
-                else if (chunk_starts_with_cstr(st.fSource, "?"))
+                else if (st.fSource.startsWith("?"))
                 {
                     kind = XML_ELEMENT_TYPE_PROCESSING_INSTRUCTION;
                     readTag(st.fSource, elementChunk);
                 }
-                else if (chunk_starts_with_cstr(st.fSource, "!DOCTYPE"))
+                else if (st.fSource.startsWith("!DOCTYPE"))
                 {
                     kind = XML_ELEMENT_TYPE_DOCTYPE;
                     readDoctype(st.fSource, elementChunk);
                 }
-                else if (chunk_starts_with_cstr(st.fSource, "!--"))
+                else if (st.fSource.startsWith("!--"))
                 {
                     kind = XML_ELEMENT_TYPE_COMMENT;
                     readComment(st.fSource, elementChunk);
                 }
-                else if (chunk_starts_with_cstr(st.fSource, "![CDATA["))
+                else if (st.fSource.startsWith("![CDATA["))
                 {
                     kind = XML_ELEMENT_TYPE_CDATA;
                     readCData(st.fSource, elementChunk);
                 }
-                else if (chunk_starts_with_cstr(st.fSource, "/"))
+                else if (st.fSource.startsWith("!ENTITY"))
+                {
+                    kind = XML_ELEMENT_TYPE_ENTITY;
+                    readEntityDeclaration(st.fSource, elementChunk);
+                }
+                else if (st.fSource.startsWith("/"))
                 {
                     kind = XML_ELEMENT_TYPE_END_TAG;
                     readTag(st.fSource, elementChunk);
@@ -897,9 +664,10 @@ namespace waavs {
 
                 elem.reset(kind, elementChunk);
 
-                return elem;
+                return !elem.isEmpty();
+
             }
-                                             break;
+            break;
 
             default:
                 // Just advance to next character
@@ -909,7 +677,8 @@ namespace waavs {
             }
         }
 
-        return elem;
+        
+        return !elem.isEmpty();
     }
     
     // XmlElementIterator
@@ -917,14 +686,20 @@ namespace waavs {
     // This is a forward only non-writeable iterator
     // 
     // Usage:
-    //   XmlElementIterator iter = XmlElementIterator(xmlChunk);
+    //   XmlElementIterator iter(xmlChunk, false);
     // 
-    //   while(iter)
+    //   while(iter.next())
     //   {
     //     printXmlElement(*iter);
-    //     iter++;
     //   }
     //
+    //.  or, you can do it this way
+    //.  
+    //.  iter++;
+    //.  while (iter) {
+    //.    printXmlElement(*iter);
+    //.    iter++;
+    //.  }
     //
     struct XmlElementIterator {
     private:
@@ -937,22 +712,29 @@ namespace waavs {
             : fState{ XML_ITERATOR_STATE_CONTENT, inChunk, inChunk }
         {
 			fParams.fAutoScanAttributes = autoScanAttributes;
+            // We do not advance in the constructor, leaving that
+            // for the user to call 'next()' to get the first element
             //next();
         }
 
+		// return 'true' if the node we're currently sitting on is valid
+        // return 'false' if otherwise
         explicit operator bool() { return !fCurrentElement.isEmpty(); }
 
         // These operators make it operate like an iterator
         const XmlElement& operator*() const { return fCurrentElement; }
         const XmlElement* operator->() const { return &fCurrentElement; }
 
+        // Increment the iterator either pre, or post notation
         XmlElementIterator& operator++() { next(); return *this; }
         XmlElementIterator& operator++(int) { next(); return *this; }
 
-        const XmlElement & next() 
+        // Return the current value of the iteration
+        //const XmlElement & next(XmlElement& elem)
+        const bool next()
         {
-            fCurrentElement = XmlElementGenerator(fParams, fState);
-            return fCurrentElement;
+            bool validElement = XmlElementGenerator(fParams, fState, fCurrentElement);
+            return validElement;
         }
     };
 }

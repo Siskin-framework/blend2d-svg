@@ -1,128 +1,342 @@
 #pragma once
 
-#pragma comment(lib, "blend2d.lib")
+#pragma comment(lib, "blend2d.lib") // Link with Blend2D static library, on Windows
 
 #include <functional>
 
-#include "blend2d/blend2d.h"
-#include "geometry.h"
+#include "blend2d.h"
 #include "fonthandler.h"
-
-
-
-namespace waavs
-{
-    // RectMode
-    enum class RECTMODE : unsigned
-    {
-        CORNER,
-        CORNERS,
-        CENTER,
-    };
-
-    // EllipseMode
-    enum class ELLIPSEMODE : unsigned
-    {
-        CORNER,
-        CORNERS,
-        CENTER,
-        RADIUS
-    };
-
-    // Text Alignment
-    enum class ALIGNMENT : unsigned
-    {
-        CENTER = 0x01,
-
-        LEFT = 0x02,
-        RIGHT = 0x04,
-
-        TOP = 0x10,
-        BASELINE = 0x20,
-        BOTTOM = 0x40,
-        MIDLINE = 0x80,
-
-    };
-
-    // Text Wrap
-    // 
-    enum class TEXTWRAP : unsigned
-    {
-        WORD,
-        CHAR
-    };
-
-
-    enum class FILLRULE : unsigned
-    {
-        NON_ZERO = 0,
-        EVEN_ODD = 1,
-    };
-}
+#include "collections.h"
+#include "svgenums.h"
 
 namespace waavs
 {
+    struct IRenderSVG;
+    struct IAmGroot;
+    
     /*
         IGraphics defines the essential interface for doing vector graphics
         This is a pure virtual interface for the most part, so a sub-class must
         implement a fair bit of stuff.
     */
+    struct SVGDrawingState {
+        
+        // Coordinate system
+        BLRect fClipRect{};
+        BLRect fContainerFrame{};
+        BLRect fObjectFrame{};
+        
+        
+
+        
+        // Paint
+        BLVar fDefaultColor;
+        uint32_t fPaintOrder{ PaintOrderKind::SVG_PAINT_ORDER_NORMAL };
+
+        // Typography
+        BLPoint fTextCursor{};
+        TXTALIGNMENT fTextHAlignment = LEFT;
+        TXTALIGNMENT fTextVAlignment = BASELINE;
+        
+        // Fontography
+        FontHandler* fFontHandler{ nullptr };   
+        BLFont fFont{};
+        ByteSpan fFamilyNames{"Arial"};
+        float fFontSize{ 16 };
+        BLFontStyle fFontStyle = BL_FONT_STYLE_NORMAL;
+        BLFontWeight fFontWeight = BL_FONT_WEIGHT_NORMAL;
+        BLFontStretch fFontStretch = BL_FONT_STRETCH_NORMAL;
+
+        
+        SVGDrawingState() = default;
+        
+        // Copy Constructor
+		SVGDrawingState(const SVGDrawingState& other) noexcept
+			: fFont(other.fFont)
+
+		{
+            fClipRect = other.fClipRect;
+            fContainerFrame = other.fContainerFrame;
+            fObjectFrame = other.fObjectFrame;
+            
+            fTextCursor = other.fTextCursor;
+            
+            fDefaultColor.assign(other.fDefaultColor);
+            fPaintOrder = other.fPaintOrder;
+
+			fTextHAlignment = other.fTextHAlignment;
+			fTextVAlignment = other.fTextVAlignment;
+            
+            fFontHandler = other.fFontHandler;
+            fFont = other.fFont;
+
+            fFamilyNames = other.fFamilyNames;
+            fFontSize = other.fFontSize;
+            fFontStyle = other.fFontStyle;
+            fFontWeight = other.fFontWeight;
+            fFontStretch = other.fFontStretch;
+		}
+        
+        // Assignment operator
+        SVGDrawingState& operator=(const SVGDrawingState& other) noexcept
+        {
+            if (this == &other)
+                return *this;
+
+
+            fClipRect = other.fClipRect;
+            fContainerFrame = other.fContainerFrame;
+            fObjectFrame = other.fObjectFrame;
+
+            fTextCursor = other.fTextCursor;
+
+            fDefaultColor.assign(other.fDefaultColor);
+            fPaintOrder = other.fPaintOrder;
+
+            fTextHAlignment = other.fTextHAlignment;
+            fTextVAlignment = other.fTextVAlignment;
+
+            fFontHandler = other.fFontHandler;
+            fFont = other.fFont;
+
+            fFamilyNames = other.fFamilyNames;
+            fFontSize = other.fFontSize;
+            fFontStyle = other.fFontStyle;
+            fFontWeight = other.fFontWeight;
+            fFontStretch = other.fFontStretch;
+
+
+            return *this;
+        }
+        
+        void reset()
+        {
+            fClipRect = BLRect{};
+            fContainerFrame = BLRect();
+            fObjectFrame = BLRect();
+
+            fDefaultColor = BLVar::null();
+            fPaintOrder = PaintOrderKind::SVG_PAINT_ORDER_NORMAL;
+
+            fTextHAlignment = LEFT;
+            fTextVAlignment = BASELINE;
+
+            fFamilyNames = "Arial";
+            fFontSize = 16;
+            fFontStyle = BL_FONT_STYLE_NORMAL;
+            fFontWeight = BL_FONT_WEIGHT_NORMAL;
+            fFontStretch = BL_FONT_STRETCH_NORMAL;
+
+            resetFont();
+        }
+
+        void resetFont()
+        {
+            if (nullptr != fFontHandler)
+            {
+                BLFont aFont;
+                if (fFontHandler->selectFont(fFamilyNames, aFont, fFontSize, fFontStyle, fFontWeight, fFontStretch))
+                    fFont = aFont;
+            }
+
+        }
+        
+		const BLRect& clipRect() const { return fClipRect; }
+		void setClipRect(const BLRect& aRect) { fClipRect = aRect; }
+        
+        
+        const BLVar & defaultColor() const { return fDefaultColor; }
+        void defaultColor(const BLVar& color) { fDefaultColor.assign(color); }
+        
+        uint32_t paintOrder() const { return fPaintOrder; }
+        void paintOrder(const uint32_t order) { fPaintOrder = order; }
+
+        // Typography changes
+		void fontHandler(FontHandler* handler) noexcept
+		{
+			fFontHandler = handler;
+
+            // Select a default faunt to start
+            if (fFontHandler != nullptr) {
+                resetFont();
+            }
+		}
+        
+
+        
+		TXTALIGNMENT textAnchor() const { return fTextHAlignment; }
+        void textAnchor(TXTALIGNMENT anchor)
+        {
+			fTextHAlignment = anchor;
+        }
+        
+        TXTALIGNMENT textAlignment() const { return fTextVAlignment; }
+        void textAlignment(TXTALIGNMENT align)
+        {
+            fTextVAlignment = align;
+        }
+        
+		BLPoint textCursor() const { return fTextCursor; }
+		void textCursor(const BLPoint& cursor){fTextCursor = cursor;}
+        
+		void fontFamily(const ByteSpan& familyNames) noexcept
+		{
+			fFamilyNames = familyNames;
+            resetFont();
+        }
+        
+        double fontSize() const noexcept {return fFontSize;}
+		void fontSize(float size) noexcept
+		{
+			fFontSize = size;
+			resetFont();
+		}
+
+		void fontStyle(BLFontStyle style) noexcept
+		{
+			fFontStyle = style;
+			resetFont();
+		}
+        
+		void fontWeight(BLFontWeight weight) noexcept
+		{
+			fFontWeight = weight;
+			resetFont();
+		}
+        
+        void fontStretch(BLFontStretch stretch) noexcept
+        {
+			fFontStretch = stretch;
+			resetFont();
+        }
+    };
+    
+
+    
     struct IRenderSVG : public BLContext
     {
-        // Typography
-        FontHandler* fFontHandler = nullptr;
-        BLFontFace fFontFace{};
-        BLFont fFont{};
-        double fFontSize = 16;
-        
-        ALIGNMENT fTextHAlignment = ALIGNMENT::LEFT;
-        ALIGNMENT fTextVAlignment = ALIGNMENT::BASELINE;
-        double fTextX{ 0 };
-        double fTextY{ 0 };
-        double fTextAdvance = 0;
+        BLVar fBackground{};
+        BLPoint fTextCursor{};
 
-        // local width/height
-		double fLocalWidth{ 0 };
-        double fLocalHeight{ 0 };
-        
+        // Managing state
+        WSStack<SVGDrawingState> fStateStack{};
+        SVGDrawingState fCurrentState{};
         
     public:
-        IRenderSVG(FontHandler* fh) :fFontHandler(fh) 
+        IRenderSVG(FontHandler* fh)
         {
-            //clearAll();
-            fillAll(BLRgba32(0xff000000u));
+			fBackground = BLRgba32(0xFFFFFFFF);
+            strokeJoin(BL_STROKE_JOIN_MITER_CLIP);
+            strokeMiterLimit(4);
+            setFillRule(BL_FILL_RULE_NON_ZERO);
+            fill(BLRgba32(0, 0, 0));
+            noStroke();
+            strokeWidth(1.0);
             
-            // Start with default state
+            fontHandler(fh);
+        }
+        
+        virtual ~IRenderSVG() {}
+
+        FontHandler* fontHandler() const { return fCurrentState.fFontHandler; }
+        void fontHandler(FontHandler* fh) { 
+            fCurrentState.fontHandler(fh);
+        }
+
+
+        void setContainerFrame(const BLRect& r) { 
+            fCurrentState.fContainerFrame = r; 
+        }
+		BLRect localFrame() const { return fCurrentState.fContainerFrame; }
+        
+
+		void objectFrame(const BLRect& r) {
+			fCurrentState.fObjectFrame = r;
+		}
+		BLRect objectFrame() const { return fCurrentState.fObjectFrame; }
+        
+        // Text Font selection
+        const BLFont& font() const { return fCurrentState.fFont; }
+        virtual void font(BLFont& afont){ fCurrentState.fFont = afont;    }
+        void resetFont() { fCurrentState.resetFont(); }
+        
+        void applyState()
+        {
+            // clear the clipping state
+            BLContext::restoreClipping();
+            
+			const BLRect &cRect = fCurrentState.clipRect();
+            if (cRect.w >0 and cRect.h>0)
+				BLContext::clipToRect(cRect);
+            
+            // probably applying font characteristics
+        }
+        
+        virtual bool push() {
+            // Save the current state to the state stack
+            fStateStack.push(fCurrentState);
+
+            // Save the blend2d context as well
+            auto res = save();
+            return res == BL_SUCCESS;
+        }
+
+        virtual bool pop() {
+            auto res = restore();
+
+
+            // Restore the current state from the state stack
+            if (!fStateStack.empty()) {
+                fCurrentState = fStateStack.top();
+                fStateStack.pop();
+
+                // Apply the current state to the context
+                applyState();
+            }
+
+            return res == BL_SUCCESS;
+        }
+
+        void resetState()
+        {
+            resetTransform();
+            
+            // Select a default faunt to start
+            fStateStack.clear();
+            fCurrentState.reset();
+        }
+        
+        // Call this before each frame to be drawn
+        void renew()
+        {
+            if (fBackground.isNull())
+                clear();
+            else
+                fillAll(fBackground);
+
+            resetState();
+
+            // Setup the default drawing state
+            // to conform to what SVG expects
             setCompOp(BL_COMP_OP_SRC_OVER);
 
             //ctx->setStrokeMiterLimit(4.0);
             strokeJoin(BL_STROKE_JOIN_MITER_CLIP);
-
 
             setFillRule(BL_FILL_RULE_NON_ZERO);
 
             fill(BLRgba32(0, 0, 0));
             noStroke();
             strokeWidth(1.0);
-            textAlign(ALIGNMENT::LEFT, ALIGNMENT::BASELINE);
-            textFamily("Arial");
-            textSize(16);
         }
-        
-        virtual ~IRenderSVG() {}
-
-        FontHandler* fontHandler() const { return fFontHandler; }
-        void fontHandler(FontHandler* fh) { fFontHandler = fh; }
 
         
-        // Execute generic operation on this context
-        // This supports interface expansion without adding new function prototypes
-        virtual void exec(std::function<void(IRenderSVG*)> f) { f(this); }
+        const BLVar& defaultColor() const { return fCurrentState.defaultColor(); }
+        void defaultColor(const BLVar& color) { fCurrentState.defaultColor(color); }
 
-        //virtual void setDpiUnits(const int dpi, const float units) = 0;
-        void localSize(double w, double h) { fLocalWidth = w; fLocalHeight = h; }
-        BLPoint localSize() const { return BLPoint(fLocalWidth, fLocalHeight); }
-        
+        uint32_t paintOrder() const { return fCurrentState.paintOrder(); }
+        void paintOrder(const uint32_t order) { fCurrentState.paintOrder(order); }
+
         virtual void strokeBeforeTransform(bool b) 
         {
             setStrokeTransformOrder(b ? BL_STROKE_TRANSFORM_ORDER_BEFORE : BL_STROKE_TRANSFORM_ORDER_AFTER);
@@ -138,15 +352,8 @@ namespace waavs
         virtual void strokeWidth(double w) { BLContext::setStrokeWidth(w); }
 		double strokeWidth() { return blContextGetStrokeWidth(this); }
         
-        virtual bool push() {
-            auto res = save();
-            return res == BL_SUCCESS;
-        }
-        
-        virtual bool pop() {
-            auto res = restore();
-            return res == BL_SUCCESS;
-        }
+
+
         
         virtual bool flush() {
             BLResult bResult = BLContext::flush(BL_CONTEXT_FLUSH_SYNC);
@@ -158,15 +365,17 @@ namespace waavs
             return bResult == BL_SUCCESS;
         }
 
-        // paint for filling polygons
-        virtual void fill(const BLVar& value) { if (!value.isNull())BLContext::setFillStyle(value); }
-        virtual void fill(const BLRgba32& value) { BLContext::setFillStyle(value); };
-        virtual void fillOpacity(double o) { BLContext::setFillAlpha(o); };
+        // paint for filling shapes
+        virtual void fill(const BLVar& value) { BLContext::setFillStyle(value); }
+        virtual void fill(const BLRgba32& value) { 
+            BLContext::setFillStyle(value); 
+        }
+        virtual void fillOpacity(double o) { BLContext::setFillAlpha(o); }
 
         virtual void noFill() { BLContext::setFillStyle(BLVar::null()); }
 
         // paint for stroking lines
-        virtual void stroke(const BLVar& value) { if (!value.isNull()) BLContext::setStrokeStyle(value); }
+        virtual void stroke(const BLVar& value) { BLContext::setStrokeStyle(value); }
         virtual void stroke(const BLRgba32& value) { BLContext::setStrokeStyle(value); }
         virtual void strokeOpacity(double o) { BLContext::setStrokeAlpha(o); }
 
@@ -176,6 +385,22 @@ namespace waavs
         // Background management
         virtual void clear() {
             BLContext::clearAll();
+        }
+        
+        void background(const BLVar& bg) noexcept
+        {
+            // Save the value of the background and...
+            blVarAssignWeak(&fBackground, &bg);
+            
+            // apply the background value immediately
+            if (bg.isNull())
+				clear();
+            else {
+                BLContext::save();
+                BLContext::setFillStyle(fBackground);
+                BLContext::fillAll();
+                BLContext::restore();
+            }
         }
         
         virtual void background(const BLRgba32& c) {
@@ -195,28 +420,34 @@ namespace waavs
         }
 
         // Clipping
-        virtual void clip(const rectf& bb) {
-            BLContext::clipToRect(BLRect(bb.x,bb.y, bb.w, bb.h));
+        void setClipRect(const BLRect& cRect) {
+			fCurrentState.setClipRect(cRect);
+			BLContext::clipToRect(cRect);
         }
         
-        virtual void noClip() { BLContext::restoreClipping(); }
+        virtual void clip(const BLRect& bb) {
+            BLContext::clipToRect(bb);
+        }
+        
+        virtual void noClip() { 
+            BLContext::restoreClipping(); 
+        }
 
         // Geometry
         // hard set a specfic pixel value
-        virtual void fillRule(int rule) { BLContext::setFillRule((BLFillRule)rule); }
-
-
-        virtual void path(const BLPath& path) {
-            //BLContext::fillPath(path);
-            BLContext::strokePath(path);
+        virtual void fillRule(int rule) { 
+            BLContext::setFillRule((BLFillRule)rule); 
         }
 
-        virtual void rect(const BLRect& geom) {
-			BLContext::fillRect(geom);
-			BLContext::strokeRect(geom);
-        }
+
         
         // Bitmaps
+        void setFillMask(BLImageCore& mask, const BLRectI &maskArea)
+        {
+            BLPointI origin(maskArea.x , maskArea.y);
+            BLResult res = blContextFillMaskI(this, &origin, &mask, &maskArea);
+        }
+        
         virtual void image(const BLImageCore& img, int x, int y)
         {
             BLContext::blitImage(BLPointI(x, y), img);
@@ -232,184 +463,42 @@ namespace waavs
             BLContext::blitImage(dst, src, srcArea);
         }
 
-        // Text Font selection
-        virtual void font(BLFont& afont)
-        {
-			fFont = afont;
-        }
+
+
+        // Typography
+        TXTALIGNMENT textAnchor() const { return fCurrentState.textAnchor(); }
+        void textAnchor(TXTALIGNMENT anchor) { fCurrentState.textAnchor(anchor); }
         
-        virtual void textFace(const BLFontFace& face) {
-            if (face.isValid()) {
-                fFontFace = face;
-                textSize(fFontSize);
-            }
-        }
+        BLPoint textCursor() const { return fTextCursor; }
+        void textCursor(const BLPoint& cursor) { fTextCursor = cursor; }
+
+        //BLPoint textCursor() const { return fCurrentState.textCursor(); }
+        //void textCursor(const BLPoint& cursor) { fCurrentState.textCursor(cursor); }
         
-        virtual void textFamily(const char* familyName) {
-            // query the font manager
-            // set the found face as the current face
-
-            BLFontFace face{};
-			auto success = fontHandler()->selectFontFamily(familyName, face);
-            
-            //auto success = fontHandler()->selectFont (familyName, fFont, fFontSize);
-
-            if (success) {
-                fFontFace = face;
-                setFontSize(fFontSize);
-            }
-        }
-
-        // Measuring Text
-        BLRect calcTextPosition(const char* txt, double x, double y)
-        {
-            BLPoint txtSize = textMeasure(txt);
-            double cx = txtSize.x;
-            double cy = txtSize.y;
-
-            switch (fTextHAlignment)
-            {
-            case ALIGNMENT::LEFT:
-                // do nothing
-                // x = x;
-                break;
-            case ALIGNMENT::CENTER:
-                x = x - (cx / 2);
-                break;
-            case ALIGNMENT::RIGHT:
-                x = x - cx;
-                break;
-
-            default:
-                break;
-            }
-
-            switch (fTextVAlignment)
-            {
-            case ALIGNMENT::TOP:
-                y = y + cy - fFont.metrics().descent;
-                break;
-            case ALIGNMENT::CENTER:
-                y = y + (cy / 2);
-                break;
-
-            case ALIGNMENT::MIDLINE:
-                //should use the design metrics xheight
-                break;
-
-            case ALIGNMENT::BASELINE:
-                // If what was passed as y is the baseline
-                // do nothing to it because blend2d draws
-                // text from baseline
-                break;
-
-            case ALIGNMENT::BOTTOM:
-                // Adjust from the bottom as blend2d
-                // prints from the baseline, so adjust
-                // by the amount of the descent
-                y = y - fFont.metrics().descent;
-                break;
-
-            default:
-                break;
-            }
-
-            return { x, y, cx, cy };
-        }
-
+        virtual void fontFamily(const ByteSpan& familyNames) {fCurrentState.fontFamily(familyNames);}
+		virtual void fontSize(double sz) { fCurrentState.fontSize(static_cast<float>(sz)); }
+		double fontSize() const { return fCurrentState.fontSize(); }
         
-        virtual BLPoint textMeasure(const char* txt) {
-            BLTextMetrics tm;
-            BLGlyphBuffer gb;
-
-            gb.setUtf8Text(txt);
-            fFont.shape(gb);
-            fFont.getTextMetrics(gb, tm);
-
-            float cx = (float)(tm.boundingBox.x1 - tm.boundingBox.x0);
-            float cy = fFont.size();
-
-
-            return BLPoint( cx, cy );
-        }
+		virtual void fontStyle(const BLFontStyle style) { fCurrentState.fontStyle(style); }
+		virtual void fontWeight(const BLFontWeight weight) { fCurrentState.fontWeight(weight); }
+        virtual void fontStretch(const BLFontStretch stretch) { fCurrentState.fontStretch(stretch); }
         
-        virtual BLPoint textEmSize() {
-            auto size = textMeasure("M");
-            return size;
-        }
-        virtual float textAscent() { return fFont.metrics().ascent; }
-        virtual float textDescent() { return fFont.metrics().descent; }
-
-        // Text Sizing and positioning
-        void setFontSize(const double size)
-        {
-            fFont.reset();
-            fFont.createFromFace(fFontFace, (float)size);
-        }
-        
-        virtual void textAlign(ALIGNMENT horizontal, ALIGNMENT vertical)
-        {
-            fTextHAlignment = horizontal;
-            fTextVAlignment = vertical;
-        }
-        
-        virtual void textSize(double size) {
-            fFontSize = fontHandler()->getAdjustedFontSize((float)size);
-            setFontSize(fFontSize);
-        }
-        
-        virtual void textPosition(double x, double y) {
-            fTextX = x;
-            fTextY = y;
-        }
-
         // Text Drawing
-        virtual void text(const char* txt) {
-            auto xy = calcTextPosition(txt, fTextX, fTextY);
-            fTextAdvance = xy.w;
-
-            text(txt, xy.x, xy.y);
+		virtual void strokeText(const ByteSpan& txt, double x, double y) {
+            BLContext::strokeUtf8Text(BLPoint(x, y), font(), (char*)txt.data(), txt.size());
+		}
+        
+        virtual void fillText(const ByteSpan& txt, double x, double y) {
+            BLContext::fillUtf8Text(BLPoint(x, y), font(), (char*)txt.data(), txt.size());
         }
         
-        virtual void text(const char* txt, double x, double y) {
-            BLContext::strokeUtf8Text(BLPoint(x, y), fFont, txt);
-            BLContext::fillUtf8Text(BLPoint(x, y), fFont, txt);
 
-            
-			fTextX += fTextAdvance;
-        }
-
-
-        virtual void vartext(double x, double y, const char* format, ...)
-        {
-            char txtBuff[512];
-            va_list args = nullptr;
-            va_start(args, format);
-
-            vsprintf_s(txtBuff, format, args);
-
-            text(txtBuff, x, y);
-            va_end(args);
-
-        }
+        
+        // Execute generic operation on this context
+        // This supports interface expansion without adding new function prototypes
+        virtual void exec(std::function<void(IRenderSVG*)> f) { f(this); }
     };
 
-    // DrawRoutine
-    // A convenience for passing to the exec() call.
-    using SVGDrawRoutine = std::function<void(IRenderSVG* ctx)>;
 
-    // IDrawable
-    // Basically a DrawRoutine, in a struct interface, for sub-classing.  It can
-    // still act as a general DrawRoutine, because of the operator() overload.
-    //
-    struct ISVGDrawable
-    {
-        virtual ~ISVGDrawable() {}
-
-        virtual void update() { ; }
-        virtual void draw(IRenderSVG* ctx) = 0;
-
-        void operator()(IRenderSVG* ctx) { draw(ctx); }
-    };
 }
 

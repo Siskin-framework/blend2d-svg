@@ -1,21 +1,24 @@
 #pragma once
 
 #include <cmath>
-#include <charconv>
 #include <cstdint>
 #include <cstring>
 #include <iterator>	// for std::data(), std::size()
 
 #include "bithacks.h"
 #include "charset.h"
-#include "maths.h"
+
 
 namespace waavs {
 
 
 	//
-	// A core type for representing a contiguous sequence of bytes
-	// As of C++ 20, there is std::span, but it is not yet widely supported
+	// ByteSpan
+	// 
+	// A core type for representing a contiguous sequence of bytes.
+	// As of C++ 20, there is std::span<>, and that would be a good 
+	// choice, but it is not yet widely supported, and forces a jump
+	// to C++20 besides.
 	// 
 	// The ByteSpan is used in everything from networking
 	// to graphics bitmaps to audio buffers.
@@ -23,8 +26,12 @@ namespace waavs {
 	// allows for easy interoperability between different
 	// subsystems.  
 	// 
-	// It also allows us to eliminate disparate implementations that
-	// are used for the same purpose.
+	// The ByteSpan, is just like 'span' and 'view' objects
+	// it does not "own" the memory, it just points at it.
+	// It is used as a stand-in for various data representations.
+	// A key aspect of the ByteSpan is its ability to be used
+	// as a 'cursor' to traverse the data it points to.
+
 
 	struct ByteSpan
 	{
@@ -32,26 +39,91 @@ namespace waavs {
 		const unsigned char* fEnd{ nullptr };
 
 		// Constructors
-		ByteSpan() : fStart(nullptr), fEnd(nullptr) {}
-		ByteSpan(const unsigned char* start, const unsigned char* end) : fStart(start), fEnd(end) {}
-		ByteSpan(const char* cstr) : fStart((const unsigned char*)cstr), fEnd((const unsigned char*)cstr + strlen(cstr)) {}
-		explicit ByteSpan(const void* data, size_t sz) :fStart((const unsigned char*)data), fEnd((const unsigned char*)data + sz) {}
+		ByteSpan() noexcept : fStart(nullptr), fEnd(nullptr) {}
+		ByteSpan(const unsigned char* start, const unsigned char* end) noexcept : fStart(start), fEnd(end) {}
+		ByteSpan(const char* cstr) noexcept : fStart((const unsigned char*)cstr), fEnd((const unsigned char*)cstr + strlen(cstr)) {}
+		explicit ByteSpan(const void* data, size_t sz) noexcept :fStart((const unsigned char*)data), fEnd((const unsigned char*)data + sz) {}
 
-
+		// reset()
+		void reset() { fStart = nullptr; fEnd = nullptr; }
 
 		// Type conversions
-		explicit operator bool() const { return (fEnd - fStart) > 0; };
+		explicit operator bool() const noexcept { return (fEnd - fStart) > 0; };
 
 
 		// Array access
-		unsigned char& operator[](size_t i) { return ((unsigned char*)fStart)[i]; }
-		const unsigned char& operator[](size_t i) const { return ((unsigned char*)fStart)[i]; }
+		unsigned char& operator[](size_t i) noexcept { return ((unsigned char*)fStart)[i]; }
+		const unsigned char& operator[](size_t i) const noexcept { return ((unsigned char*)fStart)[i]; }
 
 		// get current value from fStart, like a 'peek' operation
-		unsigned char& operator*() { static unsigned char zero = 0;  if (fStart < fEnd) return *(unsigned char*)fStart; return  zero; }
-		const uint8_t& operator*() const { static unsigned char zero = 0;  if (fStart < fEnd) return *(unsigned char*)fStart; return  zero; }
+		unsigned char& operator*() noexcept { static unsigned char zero = 0;  if (fStart < fEnd) return *(unsigned char*)fStart; return  zero; }
+		const uint8_t& operator*() const noexcept { static unsigned char zero = 0;  if (fStart < fEnd) return *(unsigned char*)fStart; return  zero; }
 
-		ByteSpan& operator+= (size_t n) {
+
+		//
+		// operators for comparison
+		// operator==;
+		// operator!=;
+		// operator<=;
+		// operator>=;
+		
+		bool equivalent(const ByteSpan& b) const noexcept
+		{
+			if (size() != b.size())
+				return false;
+			return memcmp(fStart, b.fStart, size()) == 0;
+		}
+		
+		// operator==
+		// Perform a full content comparison of the two spans
+		bool operator==(const ByteSpan& b) const noexcept
+		{
+			if (size() != b.size())
+				return false;
+			return memcmp(fStart, b.fStart, size()) == 0;
+		}
+
+		bool operator==(const char* b) const noexcept
+		{
+			size_t len = strlen(b);
+			if (size() != len)
+				return false;
+			return memcmp(fStart, b, len) == 0;
+		}
+
+		bool operator!=(const ByteSpan& b) const noexcept
+		{
+			if (size() != b.size())
+				return true;
+			return memcmp(fStart, b.fStart, size()) != 0;
+		}
+
+		bool operator<(const ByteSpan& b) const noexcept
+		{
+			size_t maxBytes = size() < b.size() ? size() : b.size();
+			return memcmp(fStart, b.fStart, maxBytes) < 0;
+		}
+
+		bool operator>(const ByteSpan& b) const noexcept
+		{
+			size_t maxBytes = size() < b.size() ? size() : b.size();
+			return memcmp(fStart, b.fStart, maxBytes) > 0;
+		}
+
+		bool operator<=(const ByteSpan& b) const noexcept
+		{
+			size_t maxBytes = size() < b.size() ? size() : b.size();
+			return memcmp(fStart, b.fStart, maxBytes) <= 0;
+		}
+
+		bool operator>=(const ByteSpan& b) const noexcept
+		{
+			size_t maxBytes = size() < b.size() ? size() : b.size();
+			return memcmp(fStart, b.fStart, maxBytes) >= 0;
+		}
+
+
+		ByteSpan& operator+= (size_t n) noexcept {
 			if (n > size())
 				n = size();
 			fStart += n;
@@ -60,8 +132,8 @@ namespace waavs {
 		}
 
 
-		ByteSpan& operator++() { return operator+=(1); }			// prefix notation ++y
-		ByteSpan& operator++(int i) { return operator+=(1); }       // postfix notation y++
+		ByteSpan& operator++() noexcept { return operator+=(1); }			// prefix notation ++y
+		ByteSpan& operator++(int ) noexcept { return operator+=(1); }       // postfix notation y++
 
 
 
@@ -69,142 +141,100 @@ namespace waavs {
 		const unsigned char* data() const noexcept { return (unsigned char*)fStart; }
 		const unsigned char* begin() const noexcept { return fStart; }
 		const unsigned char* end() const noexcept { return fEnd; }
-		size_t size()  const noexcept { return fEnd - fStart; }
+		size_t size()  const noexcept { ptrdiff_t sz = fEnd - fStart; if (sz < 0) return 0; return sz; }
 		const bool empty() const noexcept { return fStart == fEnd; }
 
 		void setAll(unsigned char c) noexcept { memset((uint8_t*)fStart, c, size()); }
+
+		void copyFrom(const void* src, size_t sz) noexcept { memcpy((uint8_t*)fStart, src, sz); }
 		
-		//
-		// Note:  For the various 'as_xxx' routines, there is no size
-		// error checking.  It is assumed that whatever is calling the
-		// function will do appropriate error checking beforehand.
-		// This is a little unsafe, but allows the caller to decide where
-		// they want to do the error checking, and therefore control the
-		// performance characteristics better.
-
-		// Read a single byte
-		uint8_t as_u8()  const noexcept
+		// subSpan()
+		// Create a bytespan that is a subspan of the current span
+		// If the requested position plus size is greater than the amount
+		// of span remaining at that position, the size will be truncated 
+		// to the amount remaining from the requested position.
+		ByteSpan subSpan(const size_t startAt, const size_t sz) const noexcept
 		{
-			uint8_t result = *((uint8_t*)fStart);
-
-			return result;
+			const uint8_t* start = fStart;
+			const uint8_t* end = fEnd;
+			if (startAt < size())
+			{
+				start += startAt;
+				if (start + sz < end)
+					end = start + sz;
+				else
+					end = fEnd;
+			}
+			else
+			{
+				start = end;
+			}
+			return { start, end };
 		}
 
-		// Read a unsigned 16 bit value
-		// assuming stream is in little-endian format
-		// and machine is also little-endian
-		uint16_t as_u16_le() const noexcept
+		ByteSpan take(size_t n) const noexcept
 		{
-			uint16_t r = *((uint16_t*)fStart);
-
-			return r;
-
-			//return ((uint8_t *)fStart)[0] | (((uint8_t *)fStart)[1] << 8);
+			return subSpan(0, n);
 		}
 
-		// Read a unsigned 32-bit value
-		// assuming stream is in little endian format
-		uint32_t as_u32_le() const noexcept
+		// Some convenient routines
+
+		bool startsWith(const ByteSpan& b) const noexcept
 		{
-			uint32_t r = *((uint32_t*)fStart);
-
-
-			return r;
-
-			//return ((uint8_t *)fStart)[0] | (((uint8_t *)fStart)[1] << 8) | (((uint8_t *)fStart)[2] << 16) |(((uint8_t *)fStart)[3] << 24);
+			return (subSpan((size_t)0, b.size()) == b);
 		}
 
-		// Read a unsigned 64-bit value
-		// assuming stream is in little endian format
-		uint64_t as_u64_le() const noexcept
+		bool endsWith(const ByteSpan& b) const noexcept
 		{
-			uint64_t r = *((uint64_t*)fStart);
-
-			return r;
-			//return ((uint8_t *)fStart)[0] | (((uint8_t *)fStart)[1] << 8) | (((uint8_t *)fStart)[2] << 16) | (((uint8_t *)fStart)[3] << 24) |
-			//    (((uint8_t *)fStart)[4] << 32) | (((uint8_t *)fStart)[5] << 40) | (((uint8_t *)fStart)[6] << 48) | (((uint8_t *)fStart)[7] << 56);
+			return (subSpan(size() - b.size(), b.size()) == b);
 		}
-
-		//=============================================
-		// BIG ENDIAN
-		//=============================================
-		// Read a unsigned 16 bit value
-		// assuming stream is in big endian format
-		uint16_t as_u16_be() noexcept
-		{
-			uint16_t r = *((uint16_t*)fStart);
-			return bswap16(r);
-		}
-
-		// Read a unsigned 32-bit value
-		// assuming stream is in big endian format
-		uint32_t as_u32_be() noexcept
-		{
-			uint32_t r = *((uint32_t*)fStart);
-			return bswap32(r);
-		}
-
-		// Read a unsigned 64-bit value
-		// assuming stream is in big endian format
-		uint64_t as_u64_be() noexcept
-		{
-			uint64_t r = *((uint64_t*)fStart);
-			return bswap64(r);
-		}
-
 	};
 
+}
 
-	static inline size_t copy(ByteSpan& a, const ByteSpan& b) noexcept;
-	static inline size_t copy_to_cstr(char* str, size_t len, const ByteSpan& a) noexcept;
-	static inline int compare(const ByteSpan& a, const ByteSpan& b) noexcept;
-	static inline int comparen(const ByteSpan& a, const ByteSpan& b, int n) noexcept;
-	static inline int comparen_cstr(const ByteSpan& a, const char* b, int n) noexcept;
-	static inline bool chunk_is_equal(const ByteSpan& a, const ByteSpan& b) noexcept;
-	static inline bool chunk_is_equal_cstr(const ByteSpan& a, const char* s) noexcept;
+namespace waavs {
+	INLINE size_t copy(ByteSpan& a, const ByteSpan& b) noexcept;
+	INLINE size_t copy_to_cstr(char* str, size_t len, const ByteSpan& a) noexcept;
+	INLINE int compare(const ByteSpan& a, const ByteSpan& b) noexcept;
+	INLINE int comparen(const ByteSpan& a, const ByteSpan& b, int n) noexcept;
+	INLINE int comparen_cstr(const ByteSpan& a, const char* b, int n) noexcept;
+	//INLINE bool chunk_is_equal_cstr(const ByteSpan& a, const char* s) noexcept;
 
 	// Some utility functions for common operations
 
-	static inline void chunk_truncate(ByteSpan& dc) noexcept;
-	static inline ByteSpan& chunk_skip(ByteSpan& dc, size_t n) noexcept;
-	static inline ByteSpan& chunk_skip_to_end(ByteSpan& dc) noexcept;
+	INLINE void chunk_truncate(ByteSpan& dc) noexcept;
+	INLINE ByteSpan& chunk_skip(ByteSpan& dc, size_t n) noexcept;
+	INLINE ByteSpan& chunk_skip_to_end(ByteSpan& dc) noexcept;
 
 	
 
-	//
-	// operators for comparison
-	// operator!=;
-	// operator<=;
-	// operator>=;
-	static inline bool operator==(const ByteSpan& a, const ByteSpan& b) noexcept;
-	static inline bool operator==(const ByteSpan& a, const char* b) noexcept;
-	static inline bool operator< (const ByteSpan& a, const ByteSpan& b) noexcept;
-	static inline bool operator> (const ByteSpan& a, const ByteSpan& b) noexcept;
-	static inline bool operator!=(const ByteSpan& a, const ByteSpan& b) noexcept;
-	static inline bool operator<=(const ByteSpan& a, const ByteSpan& b) noexcept;
-	static inline bool operator>=(const ByteSpan& a, const ByteSpan& b) noexcept;
+
+
 
 
 	// ByteSpan routines
-	static inline ByteSpan chunk_from_cstr(const char* data) noexcept { return ByteSpan{ (uint8_t*)data, (uint8_t*)data + strlen(data) }; }
+	INLINE ByteSpan chunk_from_cstr(const char* data) noexcept 
+	{ 
+		return ByteSpan{ (uint8_t*)data, (uint8_t*)data + strlen(data) }; 
+	}
 
 
-	static inline size_t chunk_size(const ByteSpan& a) noexcept { return a.size(); }
-	static inline bool chunk_empty(const ByteSpan& dc)  noexcept { return dc.fEnd == dc.fStart; }
-	static inline size_t copy(ByteSpan& a, const ByteSpan& b) noexcept
+	// inline size_t chunk_size(const ByteSpan& a) noexcept { return a.size(); }
+	INLINE bool chunk_empty(const ByteSpan& dc)  noexcept { return dc.fEnd == dc.fStart; }
+	INLINE size_t copy(ByteSpan& a, const ByteSpan& b) noexcept
 	{
 		size_t maxBytes = a.size() < b.size() ? a.size() : b.size();
 		memcpy((uint8_t*)a.fStart, b.fStart, maxBytes);
 		return maxBytes;
 	}
 
-	static inline int compare(const ByteSpan& a, const ByteSpan& b) noexcept
+	INLINE int compare(const ByteSpan& a, const ByteSpan& b) noexcept
 	{
 		size_t maxBytes = a.size() < b.size() ? a.size() : b.size();
 		return memcmp(a.fStart, b.fStart, maxBytes);
 	}
 
-	static inline int comparen(const ByteSpan& a, const ByteSpan& b, int n) noexcept
+	INLINE int comparen(const ByteSpan& a, const ByteSpan& b, int n) noexcept
 	{
 		size_t maxBytes = a.size() < b.size() ? a.size() : b.size();
 		if (maxBytes > n)
@@ -212,34 +242,22 @@ namespace waavs {
 		return memcmp(a.fStart, b.fStart, maxBytes);
 	}
 
-	static inline int comparen_cstr(const ByteSpan& a, const char* b, int n) noexcept
+	INLINE int comparen_cstr(const ByteSpan& a, const char* b, int n) noexcept
 	{
 		size_t maxBytes = a.size() < n ? a.size() : n;
+		
 		return memcmp(a.fStart, b, maxBytes);
 	}
 
-	static inline bool chunk_is_equal(const ByteSpan& a, const ByteSpan& b) noexcept
-	{
-		if (a.size() != b.size())
-			return false;
-		return memcmp(a.fStart, b.fStart, a.size()) == 0;
-	}
-
-	static inline bool chunk_is_equal_cstr(const ByteSpan& a, const char* cstr) noexcept
-	{
-		size_t len = strlen(cstr);
-		if (a.size() != len)
-			return false;
-		return memcmp(a.fStart, cstr, len) == 0;
-	}
 
 
-	static inline void chunk_truncate(ByteSpan& dc) noexcept
+
+	INLINE void chunk_truncate(ByteSpan& dc) noexcept
 	{
 		dc.fEnd = dc.fStart;
 	}
 
-	static inline ByteSpan& chunk_skip(ByteSpan& dc, size_t n) noexcept
+	INLINE ByteSpan& chunk_skip(ByteSpan& dc, size_t n) noexcept
 	{
 		if (n > dc.size())
 			n = dc.size();
@@ -248,209 +266,88 @@ namespace waavs {
 		return dc;
 	}
 
-	static inline ByteSpan& chunk_skip_to_end(ByteSpan& dc) noexcept { dc.fStart = dc.fEnd; }
-
-
-	
-
-	
-	static inline bool operator==(const ByteSpan& a, const ByteSpan& b) noexcept
-	{
-		if (a.size() != b.size())
-			return false;
-		return memcmp(a.fStart, b.fStart, a.size()) == 0;
-	}
-
-	static inline bool operator==(const ByteSpan& a, const char* b) noexcept
-	{
-		size_t len = strlen(b);
-		if (a.size() != len)
-			return false;
-		return memcmp(a.fStart, b, len) == 0;
-	}
-
-	static inline bool operator!=(const ByteSpan& a, const ByteSpan& b) noexcept
-	{
-		if (a.size() != b.size())
-			return true;
-		return memcmp(a.fStart, b.fStart, a.size()) != 0;
-	}
-
-	static inline bool operator<(const ByteSpan& a, const ByteSpan& b) noexcept
-	{
-		size_t maxBytes = a.size() < b.size() ? a.size() : b.size();
-		return memcmp(a.fStart, b.fStart, maxBytes) < 0;
-	}
-
-	static inline bool operator>(const ByteSpan& a, const ByteSpan& b) noexcept
-	{
-		size_t maxBytes = a.size() < b.size() ? a.size() : b.size();
-		return memcmp(a.fStart, b.fStart, maxBytes) > 0;
-	}
-
-	static inline bool operator<=(const ByteSpan& a, const ByteSpan& b) noexcept
-	{
-		size_t maxBytes = a.size() < b.size() ? a.size() : b.size();
-		return memcmp(a.fStart, b.fStart, maxBytes) <= 0;
-	}
-
-	static inline bool operator>=(const ByteSpan& a, const ByteSpan& b) noexcept
-	{
-		size_t maxBytes = a.size() < b.size() ? a.size() : b.size();
-		return memcmp(a.fStart, b.fStart, maxBytes) >= 0;
-	}
+	INLINE ByteSpan& chunk_skip_to_end(ByteSpan& dc) noexcept { dc.fStart = dc.fEnd; return dc; }
 
 
 }
+
 
 
 // Implementation of hash function for ByteSpan
 // so it can be used in 'map' collections
+/*
 namespace std {
 	template<>
 	struct hash<waavs::ByteSpan> {
-		size_t operator()(const waavs::ByteSpan& span) const {
-			uint32_t hash = 0;
-			
-			for (const unsigned char* p = span.fStart; p != span.fEnd; ++p) {
-				hash = hash * 31 + *p;
+		size_t operator()(const waavs::ByteSpan& span) const 
+		{
+			return waavs::fnv1a_32(span.data(), span.size());
+		}
+	};
+}
+*/
+
+namespace waavs {
+	struct ByteSpanHash {
+		size_t operator()(const ByteSpan& span) const noexcept {
+			return waavs::fnv1a_32(span.data(), span.size());
+		}
+	};
+
+	struct ByteSpanEquivalent {
+		bool operator()(const ByteSpan& a, const ByteSpan& b) const noexcept {
+			if (a.size() != b.size())
+				return false;
+			return memcmp(a.fStart, b.fStart, a.size()) == 0;
+		}
+	};
+
+	// Case insensitive 'string' comparison
+	struct ByteSpanInsensitiveHash {
+		size_t operator()(const ByteSpan& span) const noexcept {
+			return waavs::fnv1a_32_case_insensitive(span.data(), span.size());
+		}
+	};
+	
+	struct ByteSpanCaseInsensitive {
+		bool operator()(const ByteSpan& a, const ByteSpan& b) const noexcept {
+			if (a.size() != b.size())
+				return false;
+
+			for (size_t i = 0; i < a.size(); ++i) {
+				//if (TOLOWER(a[i]) != TOLOWER(b[i]))  // Case-insensitive comparison
+				if (std::tolower(a[i]) != std::tolower(b[i]))  // Case-insensitive comparison
+
+				return false;
 			}
-			return hash;
+			
+			return true;
 		}
 	};
 }
 
-
 // Functions that are implemented here
-namespace waavs {
-
-	static inline ByteSpan chunk_subchunk(const ByteSpan& a, const size_t start, const size_t sz) noexcept;
-	static inline ByteSpan chunk_take(const ByteSpan& dc, size_t n) noexcept;
-
-	static void writeChunkToFile(const ByteSpan& chunk, const char* filename) noexcept;
-	static void writeChunk(const ByteSpan& chunk) noexcept;
-	static void writeChunkBordered(const ByteSpan& chunk) noexcept;
-	static void printChunk(const ByteSpan& chunk) noexcept;
-}
 
 namespace waavs
 {
-	static charset digitChars("0123456789");
+	INLINE size_t copy_to_cstr(char* str, size_t len, const ByteSpan& a) noexcept;
+	INLINE ByteSpan chunk_ltrim(const ByteSpan& a, const charset& skippable) noexcept;
+	INLINE ByteSpan chunk_rtrim(const ByteSpan& a, const charset& skippable) noexcept;
+	INLINE ByteSpan chunk_trim(const ByteSpan& a, const charset& skippable) noexcept;
+	INLINE ByteSpan chunk_skip_wsp(const ByteSpan& a) noexcept;
 
-	static inline uint64_t chunk_to_u64(ByteSpan& s) noexcept;
-	static inline int64_t chunk_to_i64(ByteSpan& s) noexcept;
+	INLINE bool chunk_starts_with_char(const ByteSpan& a, const uint8_t b) noexcept;
+	INLINE bool chunk_starts_with_cstr(const ByteSpan& a, const char* b) noexcept;
 
-	// simple type parsing
-	static inline int64_t toInteger(const ByteSpan& inChunk) noexcept;
-	static inline double toNumber(const ByteSpan& inChunk) noexcept;
-	static inline double toDouble(const ByteSpan& inChunk) noexcept;
-	static inline std::string toString(const ByteSpan& inChunk) noexcept;
-	static inline int toBoolInt(const ByteSpan& inChunk) noexcept;
+	INLINE bool chunk_ends_with_char(const ByteSpan& a, const uint8_t b) noexcept;
+	INLINE bool chunk_ends_with_cstr(const ByteSpan& a, const char* b) noexcept;
 
-	// Number Conversions
-	static inline double chunk_to_double(const ByteSpan& inChunk) noexcept;
-}
-
-namespace waavs
-{
-	static inline size_t copy_to_cstr(char* str, size_t len, const ByteSpan& a) noexcept;
-	static inline ByteSpan chunk_ltrim(const ByteSpan& a, const charset& skippable) noexcept;
-	static inline ByteSpan chunk_rtrim(const ByteSpan& a, const charset& skippable) noexcept;
-	static inline ByteSpan chunk_trim(const ByteSpan& a, const charset& skippable) noexcept;
-	static inline ByteSpan chunk_skip_wsp(const ByteSpan& a) noexcept;
-
-	static inline bool chunk_starts_with(const ByteSpan& a, const ByteSpan& b) noexcept;
-	static inline bool chunk_starts_with_char(const ByteSpan& a, const uint8_t b) noexcept;
-	static inline bool chunk_starts_with_cstr(const ByteSpan& a, const char* b) noexcept;
-
-	static inline bool chunk_ends_with(const ByteSpan& a, const ByteSpan& b) noexcept;
-	static inline bool chunk_ends_with_char(const ByteSpan& a, const uint8_t b) noexcept;
-	static inline bool chunk_ends_with_cstr(const ByteSpan& a, const char* b) noexcept;
-
-	static inline ByteSpan chunk_token(ByteSpan& a, const charset& delims) noexcept;
-	static inline ByteSpan chunk_find_char(const ByteSpan& a, char c) noexcept;
-
-
+	INLINE ByteSpan chunk_token(ByteSpan& a, const charset& delims) noexcept;
+	INLINE ByteSpan chunk_find_char(const ByteSpan& a, char c) noexcept;
+	INLINE bool chunk_find(const ByteSpan& src, const ByteSpan& str, ByteSpan& value) noexcept;
+	INLINE ByteSpan chunk_find_cstr(const ByteSpan& a, const char* c) noexcept;
 
 }
-
-
-namespace waavs {
-
-	// Create a bytespan that is a subspan of another bytespan
-	static inline ByteSpan chunk_subchunk(const ByteSpan& a, const size_t startAt, const size_t sz) noexcept
-	{
-		const uint8_t* start = a.fStart;
-		const uint8_t* end = a.fEnd;
-		if (startAt < chunk_size(a))
-		{
-			start += startAt;
-			if (start + sz < end)
-				end = start + sz;
-			else
-				end = a.fEnd;
-		}
-		else
-		{
-			start = end;
-		}
-		return { start, end };
-	}
-
-
-	static inline ByteSpan chunk_take(const ByteSpan& dc, size_t n) noexcept
-	{
-		return chunk_subchunk(dc, 0, n);
-	}
-}
-
-namespace waavs {
-	static void writeChunkToFile(const ByteSpan& chunk, const char* filename) noexcept
-	{
-		FILE* f{};
-		errno_t err = fopen_s(&f, filename, "wb");
-		if ((err != 0) || (f == nullptr))
-			return;
-
-		fwrite(chunk.data(), 1, chunk.size(), f);
-		fclose(f);
-	}
-
-	static void writeChunk(const ByteSpan& chunk) noexcept
-	{
-		ByteSpan s = chunk;
-
-		while (s && *s) {
-			printf("%c", *s);
-			s++;
-		}
-	}
-
-	static void writeChunkBordered(const ByteSpan& chunk) noexcept
-	{
-		ByteSpan s = chunk;
-
-		printf("||");
-		while (s && *s) {
-			printf("%c", *s);
-			s++;
-		}
-		printf("||");
-	}
-
-	static void printChunk(const ByteSpan& chunk) noexcept
-	{
-		if (chunk)
-		{
-			writeChunk(chunk);
-			printf("\n");
-		}
-		else
-			printf("BLANK==CHUNK\n");
-
-	}
-}
-
 
 
 
@@ -459,12 +356,9 @@ namespace waavs {
 
 namespace waavs
 {
-	static charset wspChars(" \r\n\t\f\v");		// a set of typical whitespace chars
-
-
-	static inline size_t copy_to_cstr(char* str, size_t len, const ByteSpan& a) noexcept
+	INLINE size_t copy_to_cstr(char* str, size_t len, const ByteSpan& a) noexcept
 	{
-		size_t maxBytes = chunk_size(a) < len ? chunk_size(a) : len;
+		size_t maxBytes = a.size() < len ? a.size() : len;
 		memcpy(str, a.fStart, maxBytes);
 		str[maxBytes] = 0;
 
@@ -472,17 +366,18 @@ namespace waavs
 	}
 
 	// Trim the left side of skippable characters
-	static inline ByteSpan chunk_ltrim(const ByteSpan& a, const charset& skippable) noexcept
+	INLINE ByteSpan chunk_ltrim(const ByteSpan& a, const charset& skippable) noexcept
 	{
-		const uint8_t* start = a.fStart;
-		const uint8_t* end = a.fEnd;
-		while (start < end && skippable(*start))
-			++start;
-		return { start, end };
+		const uint8_t* startAt = a.fStart;
+		const uint8_t* endAt = a.fEnd;
+		while (startAt < endAt && skippable(*startAt))
+			++startAt;
+
+		return { startAt, endAt };
 	}
 
 	// trim the right side of skippable characters
-	static inline ByteSpan chunk_rtrim(const ByteSpan& a, const charset& skippable) noexcept
+	INLINE ByteSpan chunk_rtrim(const ByteSpan& a, const charset& skippable) noexcept
 	{
 		const uint8_t* start = a.fStart;
 		const uint8_t* end = a.fEnd;
@@ -493,56 +388,82 @@ namespace waavs
 	}
 
 	// trim the left and right side of skippable characters
-	static inline ByteSpan chunk_trim(const ByteSpan& a, const charset& skippable) noexcept
+	INLINE ByteSpan chunk_trim(const ByteSpan& a, const charset& skippable) noexcept
 	{
 		const uint8_t* start = a.fStart;
 		const uint8_t* end = a.fEnd;
+
+		// trim from the beginning
 		while (start < end && skippable(*start))
 			++start;
+
+		// trim from the end
 		while (start < end && skippable(*(end - 1)))
 			--end;
+
 		return { start, end };
 	}
 
-	static inline ByteSpan chunk_skip_wsp(const ByteSpan& a) noexcept
+	INLINE ByteSpan chunk_skip_wsp(const ByteSpan& a) noexcept
 	{
 		const uint8_t* start = a.fStart;
 		const uint8_t* end = a.fEnd;
-		while (start < end&& wspChars(*start))
+
+		while (start < end && chrWspChars(*start))
 			++start;
+
+		return { start, end };
+	}
+
+	INLINE ByteSpan chunk_skip_until_char(const ByteSpan& inChunk, const uint8_t achar) noexcept
+	{
+		const uint8_t* start = inChunk.fStart;
+		const uint8_t* end = inChunk.fEnd;
+		while (start < end && *start != achar)
+			++start;
+
 		return { start, end };
 	}
 
 
 
-	static inline bool chunk_starts_with(const ByteSpan& a, const ByteSpan& b) noexcept
+	INLINE bool chunk_starts_with_char(const ByteSpan& a, const uint8_t b) noexcept
 	{
-		return chunk_is_equal(chunk_subchunk(a, 0, chunk_size(b)), b);
+		return (a.size() > 0) && (a.fStart[0] == b);
 	}
 
-	static inline bool chunk_starts_with_char(const ByteSpan& a, const uint8_t b) noexcept
+	INLINE bool chunk_starts_with(const ByteSpan& src, const ByteSpan& str) noexcept
 	{
-		return chunk_size(a) > 0 && a.fStart[0] == b;
+		return src.startsWith(str);
 	}
 
-	static inline bool chunk_starts_with_cstr(const ByteSpan& a, const char* b) noexcept
+	INLINE bool chunk_starts_with_cstr(const ByteSpan& a, const char* b) noexcept
 	{
-		return chunk_starts_with(a, chunk_from_cstr(b));
+		// see if the null terminated string is at the beginning of the bytespan
+		const uint8_t* start = a.fStart;
+		const uint8_t* end = a.fEnd;
+		while (*b && start < end && *start == *b)
+		{
+			++start;
+			++b;
+		}
+
+		return *b == 0;
 	}
 
-	static inline bool chunk_ends_with(const ByteSpan& a, const ByteSpan& b) noexcept
+	INLINE bool chunk_ends_with(const ByteSpan& a, const ByteSpan& b) noexcept
 	{
-		return chunk_is_equal(chunk_subchunk(a, chunk_size(a) - chunk_size(b), chunk_size(b)), b);
+		return a.endsWith(b);
 	}
 
-	static inline bool chunk_ends_with_char(const ByteSpan& a, const uint8_t b) noexcept
+	INLINE bool chunk_ends_with_char(const ByteSpan& a, const uint8_t b) noexcept
 	{
-		return chunk_size(a) > 0 && a.fEnd[-1] == b;
+		return ((a.size() > 0) && (a.fEnd[-1] == b));
 	}
 
-	static inline bool chunk_ends_with_cstr(const ByteSpan& a, const char* b) noexcept
+	INLINE bool chunk_ends_with_cstr(const ByteSpan& a, const char* b) noexcept
 	{
-		return chunk_ends_with(a, chunk_from_cstr(b));
+		return a.endsWith(chunk_from_cstr(b));
 	}
 
 	// Given an input chunk
@@ -552,7 +473,31 @@ namespace waavs
 	// If delimeter NOT found
 	// returns the entire input chunk
 	// and 'a' is set to an empty chunk
-	static inline ByteSpan chunk_token(ByteSpan& a, const charset& delims) noexcept
+	INLINE ByteSpan chunk_token_char(ByteSpan& a, const char delim) noexcept
+	{
+		if (!a) {
+			a = {};
+			return {};
+		}
+
+		const uint8_t* start = a.fStart;
+		const uint8_t* end = a.fEnd;
+		const uint8_t* tokenEnd = start;
+		while (tokenEnd < end && *tokenEnd != delim)
+			++tokenEnd;
+
+		if (*tokenEnd == delim)
+		{
+			a.fStart = tokenEnd + 1;
+		}
+		else {
+			a.fStart = tokenEnd;
+		}
+
+		return { start, tokenEnd };
+	}
+
+	INLINE ByteSpan chunk_token(ByteSpan& a, const charset& delims) noexcept
 	{
 		if (!a) {
 			a = {};
@@ -577,16 +522,18 @@ namespace waavs
 	}
 
 	// name alias
-	static inline ByteSpan nextToken(ByteSpan& a, const charset&& delims) noexcept
+	INLINE ByteSpan nextToken(ByteSpan& a, const charset&& delims) noexcept
 	{
 		return chunk_token(a, delims);
 	}
+
+
 
 	// Given an input chunk
 	// find the first instance of a specified character
 	// return the chunk preceding the found character
 	// or or the whole chunk of the character is not found
-	static inline ByteSpan chunk_find_char(const ByteSpan& a, char c) noexcept
+	INLINE ByteSpan chunk_find_char(const ByteSpan& a, char c) noexcept
 	{
 		const uint8_t* start = a.fStart;
 		const uint8_t* end = a.fEnd;
@@ -596,26 +543,83 @@ namespace waavs
 		return { start, end };
 	}
 
-	static inline ByteSpan chunk_find_cstr(const ByteSpan& a, const char* c) noexcept
+	// 
+	// chunk_find()
+	// 
+	// Scan a ByteSpan 'src', looking for the search span 'str'
+	// return true if it's found, and set the 'value' ByteSpan 
+	// to the location.
+	INLINE bool chunk_find(const ByteSpan& src, const ByteSpan& str, ByteSpan& value) noexcept
+	{
+		const uint8_t* start = src.fStart;
+		const uint8_t* end = src.fEnd;
+		const uint8_t* b = str.fStart;
+		const uint8_t* bEnd = str.fEnd;
+
+		while (start < end)
+		{
+			// find the first character of the search string in the source string
+			while (start < end && *start != *b)
+				++start;
+
+			// if we've run out of source string, we didn't find it
+			if (start == end)
+				return false;
+
+			// now that we've found a potential first character
+			// of the search string, we need to see if the rest
+			// of the search string is present
+			while (start < end && b < bEnd && *start == *b)
+			{
+				++start;
+				++b;
+			}
+
+			// if we've run out of search string, we found it
+			if (b == bEnd)
+			{
+				value = { start - str.size(), start };
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	INLINE ByteSpan chunk_find_cstr(const ByteSpan& a, const char* c) noexcept
 	{
 		const uint8_t* start = a.fStart;
 		const uint8_t* end = a.fEnd;
 		const uint8_t* cstart = (const uint8_t*)c;
 		const uint8_t* cend = cstart + strlen(c);
-		while (start < end && !chunk_starts_with({ start, end }, { cstart, cend }))
+		ByteSpan cChunk(cstart, cend);
+
+		while (start < end)
+		{
+			if (*start == *cstart)
+			{
+
+				if (chunk_starts_with({ start, end }, cChunk))
+				{
+					break;
+					//return { start, end };
+				}
+			}
+
 			++start;
+		}
 
 		return { start, end };
 	}
 
-	static inline ByteSpan chunk_read_bracketed(ByteSpan& src, const uint8_t lbracket, const uint8_t rbracket) noexcept
+	INLINE ByteSpan chunk_read_bracketed(ByteSpan& src, const uint8_t lbracket, const uint8_t rbracket) noexcept
 	{
 		uint8_t* beginattrValue = nullptr;
 		uint8_t* endattrValue = nullptr;
-		uint8_t quote{};
+		//uint8_t quote{};
 
 		// Skip white space before the quoted bytes
-		src = chunk_ltrim(src, wspChars);
+		src = chunk_ltrim(src, chrWspChars);
 
 		if (!src || *src != lbracket)
 			return {};
@@ -638,316 +642,179 @@ namespace waavs
 		// Store only well formed quotes
 		return { beginattrValue, endattrValue };
 	}
-
-	// Take a chunk containing a series of digits and turn
-	// it into a 64-bit unsigned integer
-	// Stop processing when the first non-digit is seen, 
-	// or the end of the chunk
-	static inline uint64_t chunk_to_u64(ByteSpan& s) noexcept
-	{
-		//static charset digitChars("0123456789");
-
-		uint64_t v = 0;
-
-		while (s && digitChars(*s))
-		{
-			v = v * 10 + (uint64_t)(*s - '0');
-			s++;
-		}
-
-		return v;
-	}
-
-	static inline int64_t chunk_to_i64(ByteSpan& s) noexcept
-	{
-		//static charset digitChars("0123456789");
-
-		int64_t v = 0;
-
-		bool negative = false;
-		if (s && *s == '-')
-		{
-			negative = true;
-			s++;
-		}
-
-		while (s && digitChars(*s))
-		{
-			v = v * 10 + (int64_t)(*s - '0');
-			s++;
-		}
-
-		if (negative)
-			v = -v;
-
-		return v;
-	}
-
-	// Parse a number which may have units after it
-//   1.2em
-// -1.0E2em
-// 2.34ex
-// -2.34e3M10,20
-// 
-// By the end of this routine, the numchunk represents the range of the 
-// captured number.
-// 
-// The returned chunk represents what comes next, and can be used
-// to continue scanning the original inChunk
-//
-// Note:  We assume here that the inChunk is already positioned at the start
-// of a number (including +/- sign), with no leading whitespace
-
-	static ByteSpan scanNumber(const ByteSpan& inChunk, ByteSpan& numchunk)
-	{
-		//static charset digitChars("0123456789");                   // only digits
-
-		ByteSpan s = inChunk;
-		numchunk = inChunk;
-		numchunk.fEnd = inChunk.fStart;
-
-
-		// sign
-		if (*s == '-' || *s == '+') {
-			s++;
-			numchunk.fEnd = s.fStart;
-		}
-
-		// integer part
-		while (s && digitChars[*s]) {
-			s++;
-			numchunk.fEnd = s.fStart;
-		}
-
-		if (*s == '.') {
-			// decimal point
-			s++;
-			numchunk.fEnd = s.fStart;
-
-			// fraction part
-			while (s && digitChars[*s]) {
-				s++;
-				numchunk.fEnd = s.fStart;
-			}
-		}
-
-		// exponent
-		// but it could be units (em, ex)
-		if ((*s == 'e' || *s == 'E') && (s[1] != 'm' && s[1] != 'x'))
-		{
-			s++;
-			numchunk.fEnd = s.fStart;
-
-			// Might be a sign
-			if (*s == '-' || *s == '+') {
-				s++;
-				numchunk.fEnd = s.fStart;
-			}
-
-			// Get any remaining digits
-			while (s && digitChars[*s]) {
-				s++;
-				numchunk.fEnd = s.fStart;
-			}
-		}
-
-		return s;
-	}
-
-	// parse floating point number
-	// includes sign, exponent, and decimal point
-	// The input chunk is altered, with the fStart pointer moved to the end of the number
-
-	static inline double chunk_to_double(const ByteSpan& inChunk) noexcept
-	{
-		ByteSpan s = inChunk;
-		/*
-		double outNumber = 0;
-
-
-		auto res = std::from_chars((const char*)s.fStart, (const char*)s.fEnd, outNumber);
-		if (res.ec == std::errc::invalid_argument)
-		{
-			printf("chunk_to_double: INVALID ARGUMENT: ");
-			printChunk(s);
-		}
-
-		return outNumber;
-		*/
-
-		///*
-		//static charset digitChars("0123456789");
-
-		double sign = 1.0;
-		double res = 0.0;
-		long long intPart = 0;
-		uint64_t fracPart = 0;
-		bool hasIntPart = false;
-		bool hasFracPart = false;
-
-		// Parse optional sign
-		if (*s == '+') {
-			s++;
-		}
-		else if (*s == '-') {
-			sign = -1;
-			s++;
-		}
-
-		// Parse integer part
-		if (digitChars[*s]) {
-
-			intPart = chunk_to_u64(s);
-
-			res = (double)intPart;
-			hasIntPart = true;
-		}
-
-		// Parse fractional part.
-		if (*s == '.') {
-			s++; // Skip '.'
-			auto sentinel = s.fStart;
-
-			if (digitChars(*s)) {
-				fracPart = chunk_to_u64(s);
-				auto ending = s.fStart;
-
-				ptrdiff_t diff = ending - sentinel;
-				res = res + ((double)fracPart) / (double)powd((double)10, double(diff));
-				hasFracPart = true;
-			}
-		}
-
-		// A valid number should have integer or fractional part.
-		if (!hasIntPart && !hasFracPart)
-			return 0.0;
-
-
-		// Parse optional exponent
-		if (*s == 'e' || *s == 'E') {
-			long long expPart = 0;
-			s++; // skip 'E'
-
-			double expSign = 1.0;
-			if (*s == '+') {
-				s++;
-			}
-			else if (*s == '-') {
-				expSign = -1.0;
-				s++;
-			}
-
-			if (digitChars[*s]) {
-				expPart = chunk_to_u64(s);
-				res = res * powd(10, double(expSign * double(expPart)));
-			}
-		}
-
-		return res * sign;
-		//*/
-	}
-
-	// Consume the next number off the front of the chunk
-	// modifying the input chunk to advance past the  number
-	// we removed.
-	// Return true if we found a number, false otherwise
-	static inline bool parseNextNumber(ByteSpan& s, double& outNumber)
-	{
-		static charset whitespaceChars(",\t\n\f\r ");          // whitespace found in paths
-
-		// clear up leading whitespace, including ','
-		s = chunk_ltrim(s, whitespaceChars);
-
-		ByteSpan numChunk{};
-		s = scanNumber(s, numChunk);
-
-		if (!numChunk)
-			return false;
-
-		outNumber = toDouble(numChunk);
-
-		return true;
-	}
 }
-
-
-
-
 
 namespace waavs {
 
-	static inline int64_t toInteger(const ByteSpan& inChunk) noexcept
+	// readNextKeyValue()
+	// 
+	// Attributes are separated by '=' and values are quoted with 
+	// either "'" or '"'
+	// Ex: <tagname attr1='first value'  attr2="second value" />
+	// The src so it points past the end of the retrieved value
+	static bool readNextKeyAttribute(ByteSpan& src, ByteSpan& key, ByteSpan& value) noexcept
 	{
-		ByteSpan s = inChunk;
-		return chunk_to_i64(s);
+		// Zero these out in case there is failure
+		//key = {};
+		//value = {};
+
+		static charset equalChars("=");
+		static charset quoteChars("\"'");
+
+		bool start = false;
+		bool end = false;
+		uint8_t quote{};
+
+		uint8_t* beginattrValue = nullptr;
+		uint8_t* endattrValue = nullptr;
+
+
+		// Skip leading white space before the key name
+		src = chunk_ltrim(src, chrWspChars);
+
+		if (!src)
+			return false;
+
+		// Special case of running into an end tag
+		if (*src == '/') {
+			end = true;
+			return false;
+		}
+
+		// Find end of the attrib name.
+		//auto attrNameChunk = chunk_token(src, equalChars);
+		auto attrNameChunk = chunk_token_char(src, '=');
+		key = chunk_trim(attrNameChunk, chrWspChars);
+
+		// Skip stuff past '=' until we see one of our quoteChars
+		while (src && !quoteChars[*src])
+			src++;
+
+		// If we've run out of input, return false
+		if (!src)
+			return false;
+
+		// capture the quote character
+		quote = *src;
+
+		// move past the beginning of the quote
+		// and mark the beginning of the value portion
+		src++;
+		beginattrValue = (uint8_t*)src.fStart;
+
+		// Skip anything that is not the quote character
+		// to mark the end of the value
+		// don't use quoteChars here, because it's valid to 
+		// embed the other quote within the value
+		src = chunk_skip_until_char(src, quote);
+
+		// If we still have input, it means we found
+		// the quote character, so mark the end of the
+		// value
+		if (src)
+		{
+			endattrValue = (uint8_t*)src.fStart;
+			src++;
+		}
+		else {
+			// We did not find the closing quote
+			// so we don't have a valid value
+			return false;
+		}
+
+
+		// Store only well formed attributes
+		value = { beginattrValue, endattrValue };
+
+		return true;
 	}
 
-	// toNumber
-	// a floating point number
-	static inline double toNumber(const ByteSpan& inChunk) noexcept
+	
+	// readNextCSSKeyValue()
+	// 
+	// Properties are separated by ';'
+	// values are separated from the key with ':'
+	// Ex: <tagname style="stroke:black;fill:white" />
+	// Return
+	//   true - if a valid key/value pair was found
+	//      in this case, key, and value will be populated
+	//   false - if no key/value pair was found, or end of string
+	//      in this case, key, and value will be undefined
+	//
+	static bool readNextCSSKeyValue(ByteSpan& src, ByteSpan& key, ByteSpan& value, const unsigned char fieldDelimeter = ';', const unsigned char keyValueSeparator = ':') noexcept
 	{
-		ByteSpan s = inChunk;
-		return chunk_to_double(s);
+		// Trim leading whitespace to begin
+		src = chunk_ltrim(src, chrWspChars);
+
+		// If the string is now blank, return immediately
+		if (!src)
+			return false;
+
+		// peel off a key/value pair by taking a token up to the fieldDelimeter
+		value = chunk_token_char(src, fieldDelimeter);
+
+		// Now, separate the key from the value using the keyValueSeparator
+		key = chunk_token_char(value, keyValueSeparator);
+
+		// trim the key and value fields of whitespace
+		key = chunk_trim(key, chrWspChars);
+		value = chunk_trim(value, chrWspChars);
+
+		return true;
 	}
-
-	static inline double toDouble(const ByteSpan& s) noexcept
-	{
-		return chunk_to_double(s);
-
-	}
-
-	// return 1 if the chunk is "true" or "1" or "t" or "T" or "y" or "Y" or "yes" or "Yes" or "YES"
-	// return 0 if the chunk is "false" or "0" or "f" or "F" or "n" or "N" or "no" or "No" or "NO"
-	// return 0 otherwise
-	static inline int toBoolInt(const ByteSpan& inChunk) noexcept
-	{
-		ByteSpan s = inChunk;
-
-		if (s == "true" || s == "1" || s == "t" || s == "T" || s == "y" || s == "Y" || s == "yes" || s == "Yes" || s == "YES")
-			return 1;
-		else if (s == "false" || s == "0" || s == "f" || s == "F" || s == "n" || s == "N" || s == "no" || s == "No" || s == "NO")
-			return 0;
-		else
-			return 0;
-	}
-
-	static inline std::string toString(const ByteSpan& inChunk) noexcept
-	{
-		return std::string(inChunk.fStart, inChunk.fEnd);
-	}
+	
 
 }
 
 
-/*
-
-	static inline void skipOverCharset(ByteSpan& dc, const charset& cs)
+namespace waavs {
+	/*
+	static void writeChunkToFile(const ByteSpan& chunk, const char* filename) noexcept
 	{
-		while (dc && cs.contains(*dc))
-			dc++;
+		FILE* f{};
+		errno_t err = fopen_s(&f, filename, "wb");
+		if ((err != 0) || (f == nullptr))
+			return;
+
+		fwrite(chunk.data(), 1, chunk.size(), f);
+		fclose(f);
 	}
+	*/
 
-	static inline void skipUntilCharset(ByteSpan& dc, const charset& cs)
+	INLINE void writeChunk(const ByteSpan& chunk) noexcept
 	{
-		while (dc && !cs.contains(*dc))
-			++dc;
-	}
+		ByteSpan s = chunk;
 
-		// Turn a chunk into a vector of chunks, splitting on the delimiters
-	// return number of tokens found
-	static inline  int chunk_split(const ByteSpan& inChunk, const charset& delims, std::vector<svg2b2d::ByteSpan> spans, bool wantEmpties = false) noexcept
-	{
-		ByteSpan s = inChunk;
-
-		while (s)
-		{
-			ByteSpan token = chunk_token(s, delims);
-			//if (size(token) > 0)
-			spans.push_back(token);
-
+		while (s && *s) {
+			printf("%c", *s);
+			s++;
 		}
-
-		return spans.size();
 	}
 
-*/
+	INLINE void writeChunkBordered(const ByteSpan& chunk) noexcept
+	{
+		ByteSpan s = chunk;
+
+		printf("||");
+		while (s && *s) {
+			printf("%c", *s);
+			s++;
+		}
+		printf("||");
+	}
+
+	INLINE void printChunk(const ByteSpan& chunk) noexcept
+	{
+		if (chunk)
+		{
+			writeChunk(chunk);
+			printf("\n");
+		}
+		else
+			printf("BLANK==CHUNK\n");
+
+	}
+}
+
+
+

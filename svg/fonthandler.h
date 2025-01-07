@@ -3,7 +3,7 @@
 #ifndef fonthandler_h
 #define fonthandler_h
 
-#include <filesystem>
+
 #include <algorithm>
 #include <vector>
 #include <memory>
@@ -13,8 +13,7 @@
 
 
 
-#include "blend2d/blend2d.h"
-
+#include "blend2d.h"
 #include "maths.h"
 #include "bspan.h"
 
@@ -22,6 +21,7 @@
 
 
 namespace waavs {
+    /*
 	static bool endsWith(const std::string& src, const std::string &suffix) 
     {
         if (suffix.size() > src.size())
@@ -29,6 +29,7 @@ namespace waavs {
         
         return src.substr(src.size() - suffix.size()) == suffix;
 	}
+    */
     
     class FontHandler
     {
@@ -88,82 +89,52 @@ namespace waavs {
         // create a single font face by filename
         // Put it into the font manager
         // return it to the user
-        BLFontFace loadFontFace(const char* filename)
+        bool loadFontFace(const char* filename, BLFontFace &ff)
         {
-            BLFontFace ff;
+            //BLFontFace ff;
             //BLResult err = ff.createFromFile(filename, BL_FILE_READ_MMAP_AVOID_SMALL);
             BLResult err = ff.createFromFile(filename);
 
             if (!err)
             {
-                //printf("loadFont() adding: %s\n", ff.familyName().data());
-                //BLBitSet aSet;
-				//blBitSetInit(&aSet);
+                //printf("FontHandler.loadFont() adding: %s\n", ff.familyName().data());
 
-				//ff.getCharacterCoverage(&aSet);
-				//printf("FontHandler::loadFont() coverage: %d\n", aSet.cardinality());
+
                 
                 fFontManager.addFace(ff);
                 fFamilyNames.push_back(std::string(ff.familyName().data()));
+                return true;
             }
             else {
                 ;
                 printf("FontHandler::loadFont Error: %s (0x%x)\n", filename, err);
             }
 
-            return ff;
+            return false;
         }
 
         // Load the list of font files into 
         // the font manager
-        void loadFonts(std::vector<const char*> fontNames)
+        bool loadFonts(std::vector<const char*> fontNames)
         {
+            bool success{ false };
+            
             for (const auto& filename : fontNames)
             {
-                BLFontFace face = loadFontFace(filename);
-                //printf("loadFonts: %s, 0x%x\n", face.familyName().data(), face.isValid());
+                BLFontFace ff{};
+                bool success = loadFontFace(filename, ff);
+                if (!success)
+				{
+                    //printf("loadFonts: %s, 0x%x\n", face.familyName().data(), face.isValid());
+					return false;
+				}
+
             }
+
+            return true;
         }
 
-        void loadDirectoryOfFonts(const char* dir)
-        {
-            const std::filesystem::path fontPath(dir);
 
-            for (const auto& dir_entry : std::filesystem::directory_iterator(fontPath))
-            {
-                if (dir_entry.is_regular_file())
-                {
-                    if (endsWith(dir_entry.path().generic_string(),".ttf") || 
-                        endsWith(dir_entry.path().generic_string(),".TTF") ||
-                        endsWith(dir_entry.path().generic_string(),".otf"))
-                    {
-                        BLFontFace ff;
-                        ff = loadFontFace(dir_entry.path().generic_string().c_str());
-                    }
-                }
-            }
-        }
-
-        // Do this only once to load in fonts
-        void loadDefaultFonts()
-        {
-            // Load in some fonts to start
-            std::vector<const char*> fontNames{
-                "c:\\Windows\\Fonts\\arial.ttf",
-                "c:\\Windows\\Fonts\\calibri.ttf",
-                "c:\\Windows\\Fonts\\cascadiacode.ttf",
-                "c:\\Windows\\Fonts\\consola.ttf",
-                "c:\\Windows\\Fonts\\cour.ttf",
-                "c:\\Windows\\Fonts\\gothic.ttf",
-                "c:\\Windows\\Fonts\\segoui.ttf",
-                "c:\\Windows\\Fonts\\tahoma.ttf",
-                "c:\\Windows\\Fonts\\terminal.ttf",
-                "c:\\Windows\\Fonts\\times.ttf",
-                "c:\\Windows\\Fonts\\verdana.ttf",
-                "c:\\Windows\\Fonts\\wingding.ttf"
-            };
-            loadFonts(fontNames);
-        }
 
         float getAdjustedFontSize(float sz) const
         {
@@ -178,6 +149,8 @@ namespace waavs {
         // with defaults of 'normal'
 		bool selectFontFamily(const ByteSpan& names, BLFontFace& face, uint32_t style= BL_FONT_STYLE_NORMAL, uint32_t weight= BL_FONT_WEIGHT_NORMAL, uint32_t stretch= BL_FONT_STRETCH_NORMAL) const
 		{
+            static charset fontWsp = chrWspChars + ',';
+            
             charset delims(",");
             charset quoteChars("'\"");
 
@@ -191,7 +164,7 @@ namespace waavs {
             // nammes are quoted, or separated by commas
             while (s.size() > 0)
             {
-                s = chunk_ltrim(s, wspChars);
+                s = chunk_ltrim(s, fontWsp);
                 ByteSpan name = chunk_token(s, delims);
                 name = chunk_trim(name, quoteChars);
 
@@ -203,9 +176,20 @@ namespace waavs {
 
                 if ((name == "Sans") ||
                     (name == "sans") ||
-                    (name == "sans-serif")) {
+                    (name == "Helvetica") ||
+                    (name == "sans-serif")) 
+                {
                     success = (BL_SUCCESS == fFontManager.queryFace("Arial", qprops, face));
                 }
+				else if ((name == "Serif") ||
+					(name == "serif")) {
+					success = (BL_SUCCESS == fFontManager.queryFace("Georgia", qprops, face));  // Times New Roman, Garamond, Georgia
+				}
+				else if ((name == "Mono") ||
+					(name == "mono") ||
+					(name == "monospace")) {
+					success = (BL_SUCCESS == fFontManager.queryFace("Consolas", qprops, face));
+				}
                 else {
                     familyNameView.reset((char*)name.fStart, name.size());
                     success = (BL_SUCCESS == fFontManager.queryFace(familyNameView, qprops, face));
@@ -215,11 +199,14 @@ namespace waavs {
 					return true;
 
 				// Didn't find it, try the next one
-                printf("== FontHandler::selectFontFamily, NOT FOUND: ");
-                printChunk(name);
-			}
+                //printf("== FontHandler::selectFontFamily, NOT FOUND: ");
+                //printChunk(name);
+            }
+
+            // last chance, nothing else worked, so try loading our default, Arial
+            bool success = (BL_SUCCESS == fFontManager.queryFace("Arial", qprops, face));
             
-			return false;
+			return success;
 		}
         
         

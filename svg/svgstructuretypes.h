@@ -1,5 +1,7 @@
 #pragma once
 
+#ifndef SVGSTRUCTURETYPES_H
+#define SVGSTRUCTURETYPES_H
 
 #include <memory>
 #include <vector>
@@ -8,619 +10,435 @@
 #include <cstdint>		// uint8_t, etc
 #include <cstddef>		// nullptr_t, ptrdiff_t, size_t
 
-#include "xmlscan.h"
+#include "maths.h"
 
-#include "svgcolors.h"
 #include "svgdatatypes.h"
 #include "svgcss.h"
-
 #include "irendersvg.h"
-#include "placeable.h"
-
-#include "base64.h"
+#include "uievent.h"
+#include "collections.h"
+#include "xmlscan.h"
 
 
 
 
 namespace waavs {
-    struct IAmGroot;    // forward declaration
+    struct IAmGroot;        // forward declaration
+    struct IManageReferences;  // forward declaration
 
     struct SVGObject
     {
     protected:
-        IAmGroot* fRoot{ nullptr };
+        ByteSpan fId{};      // The id of the element
+
         bool fNeedsBinding{ false };
 
     public:
-        BLVar fVar{};
 
+        // default and copy constructor not allowed, let's see what breaks
+        SVGObject() = default;
 
-        SVGObject(IAmGroot* root) :fRoot(root) {}
-
-        SVGObject() = delete;
+        // want to know when a copy or assignment is happening
+        // so mark these as 'delete' for now so we can catch it
         SVGObject(const SVGObject& other) = delete;
         SVGObject& operator=(const SVGObject& other) = delete;
-
 
         virtual ~SVGObject() = default;
 
 
-        bool needsBinding() const { return fNeedsBinding; }
-        void needsBinding(bool needsIt) { fNeedsBinding = needsIt; }
+        const ByteSpan& id() const noexcept { return fId; }
+        void id(const ByteSpan& aid) noexcept { fId = aid; }
 
-        IAmGroot* root() const { return fRoot; }
 
-        virtual void bindToGroot(IAmGroot* groot) { fRoot = groot; } // { fRoot = groot; bindSelfToGroot(groot); }
+        bool needsBinding() const noexcept { return fNeedsBinding; }
+        void needsBinding(bool needsIt) noexcept { fNeedsBinding = needsIt; }
+
+
+        virtual void bindToContext(IRenderSVG*, IAmGroot*) noexcept = 0;
 
         // sub-classes should return something interesting as BLVar
         // This can be used for styling, so images, colors, patterns, gradients, etc
-        virtual const BLVar& getVariant()
-        {
-            return fVar;
-        }
+        virtual const BLVar getVariant(IRenderSVG*, IAmGroot*) noexcept { return BLVar::null(); }
 
 
     };
+}
 
-    struct SVGViewable : public SVGObject, public IViewable, public XmlAttributeCollection
+
+namespace waavs {
+    struct IViewable : public SVGObject
     {
         bool fIsVisible{ true };
-        std::string fId{};      // The id of the element
+        ByteSpan fName{};
 
-        
-        
-        SVGViewable(IAmGroot* groot) :SVGObject(groot) {}
 
-        const std::string& id() const { return fId; }
-        void id(const std::string& aid) { fId = aid; }
-        
-        
+        virtual BLRect frame() const = 0;
+        virtual BLRect getBBox() const = 0;
+
+        void name(const ByteSpan& aname) { fName = aname; }
+        const ByteSpan& name() const { return fName; }
+
         const bool visible() const { return fIsVisible; }
         void visible(bool visible) { fIsVisible = visible; }
 
-        // ISVGDrawable
-        void draw(IRenderSVG* ctx) override {  return; }
+        virtual void fixupStyleAttributes(IRenderSVG* ctx, IAmGroot* groot) = 0;
 
-        // IPlaceable
-        BLRect frame() const override { return BLRect(); }
-        BLRectI getBBox() const override { return BLRectI{}; }
-        
-        void moveTo(double x, double y) override { ; }
-        //void mouseEvent(const MouseEvent& e) override { return; }
-        
+        virtual void update(IAmGroot*) = 0;
+        virtual void draw(IRenderSVG*, IAmGroot*) = 0;
 
-        virtual void loadSelfFromXmlElement(const XmlElement& elem)
-        {
-            ;
-        }
-
-        virtual void loadFromXmlElement(const XmlElement& elem)
-        {
-            scanAttributes(elem.data());
-            name(elem.name());
-            
-            auto idchunk = getAttribute("id");
-            if (idchunk)
-                id(std::string(idchunk.fStart, idchunk.fEnd));
-
-            loadSelfFromXmlElement(elem);
-        }
-        
-        virtual void loadFromXmlIterator(XmlElementIterator& iter)
-        {
-            loadFromXmlElement(*iter);
-            iter++;
-        }
     };
-
-    // Interface Am Graphics Root (IAmGroot) 
-    // Core interface to hold document level state, primarily
-    // for the purpose of looking up nodes, but also for style sheets
-    struct IAmGroot
-    {
-        virtual std::shared_ptr<SVGViewable> getElementById(const std::string& name) = 0;
-        virtual std::shared_ptr<SVGViewable> findNodeByHref(const ByteSpan& href) = 0;
-        virtual std::shared_ptr<SVGViewable> findNodeByUrl(const ByteSpan& inChunk) = 0;
-        virtual ByteSpan findEntity(const std::string& name) = 0;
-
-        virtual FontHandler* fontHandler() const = 0;
-
-        virtual std::shared_ptr<CSSStyleSheet> styleSheet() = 0;
-        virtual void styleSheet(std::shared_ptr<CSSStyleSheet> sheet) = 0;
-
-        virtual void addDefinition(const std::string& name, std::shared_ptr<SVGViewable> obj) = 0;
-        virtual void addEntity(const std::string& name, ByteSpan expansion) = 0;
-
-        virtual std::string systemLanguage() { return "en"; } // BUGBUG - What a big cheat!!
-
-        virtual double canvasWidth() const = 0;
-        virtual double canvasHeight() const = 0;
-        virtual double dpi() const = 0;
-    };
-
 }
-
 
 
 namespace waavs {
 
 
     // SVGVisualProperty
-    // This is meant to be the base class for things that are optionally
-    // used to alter the graphics context.
+    // 
+    // This is the base class for things that alter the graphics context while drawing
     // If isSet() is true, then the drawSelf() is called.
-    // sub-classes should override drawSelf() to do the actual drawing
+    // sub-classes should override drawSelf() to do the actual drawing.
     //
-    // This is used for things like; Paint, Transform, Miter, etc.
+    // These properties are independent like; Paint, Transform, Miter, etc.
+    // and they usually make a state altering call on the drawing context
     //
-    struct SVGVisualProperty : public SVGObject  // public SVGViewable
+    struct SVGVisualProperty : public SVGObject
     {
         bool fAutoDraw{ true };
         bool fIsSet{ false };
         ByteSpan fRawValue;
 
-        SVGVisualProperty(IAmGroot* groot) :SVGObject(groot), fIsSet(false) {}
+
+        SVGVisualProperty(IAmGroot*) :SVGObject(), fIsSet(false) { needsBinding(false); }
 
         SVGVisualProperty(const SVGVisualProperty& other) = delete;
         SVGVisualProperty& operator=(const SVGVisualProperty& rhs) = delete;
 
 
-        void set(const bool value) { fIsSet = value; }
+        bool set(const bool value) { fIsSet = value; return value; }
         bool isSet() const { return fIsSet; }
 
-		void autoDraw(bool value) { fAutoDraw = value; }
-		bool autoDraw() const { return fAutoDraw; }
-        
+        void autoDraw(bool value) { fAutoDraw = value; }
+        bool autoDraw() const { return fAutoDraw; }
+
         const ByteSpan& rawValue() const { return fRawValue; }
 
-        virtual bool loadSelfFromChunk(const ByteSpan& chunk)
+        virtual bool loadSelfFromChunk(const ByteSpan&)
         {
             return true;
         }
 
         bool loadFromChunk(const ByteSpan& inChunk)
         {
-            fRawValue = chunk_trim(inChunk, xmlwsp);
-            if (!fRawValue)
-            {
-                // convert the inChunk to a string
-                // so we can print it out
-				std::string chunkStr(inChunk.fStart, inChunk.fEnd);
-				//printf("BLANK VisualProperty: %s\n", chunkStr.c_str());
-                set(false);
+            auto s = chunk_trim(inChunk, chrWspChars);
+
+            if (!s)
                 return false;
-            }
 
-            return loadSelfFromChunk(fRawValue);
+            fRawValue = s;
+
+            return this->loadSelfFromChunk(fRawValue);
         }
 
-        virtual void update() { ; }
-        
-        // Apply propert to the context conditionally
-        virtual void drawSelf(IRenderSVG* ctx)
+        virtual bool loadFromAttributes(const XmlAttributeCollection& attrs)
         {
-            ;
+            auto attr = attrs.getAttribute(id());
+            if (!attr)
+                return false;
+            
+            return loadFromChunk(attr);
         }
 
-        virtual void draw(IRenderSVG* ctx)
+		void bindToContext(IRenderSVG*, IAmGroot*) noexcept override
+		{
+            needsBinding(false);
+			// do nothing
+		}
+
+        
+        virtual void update(IAmGroot*) { ; }
+
+        // Apply propert to the context conditionally
+        virtual void drawSelf(IRenderSVG*, IAmGroot*) { ; }
+
+        virtual void draw(IRenderSVG* ctx, IAmGroot* groot)
         {
             //printf("SVGVisualProperty::draw == ");
             //printChunk(fRawValue);
-
+            if (needsBinding())
+                this->bindToContext(ctx, groot);
+            
             if (isSet())
-                drawSelf(ctx);
+                this->drawSelf(ctx, groot);
         }
 
     };
 
-    static std::map<std::string, std::function<std::shared_ptr<SVGVisualProperty>(const ByteSpan&)>> gSVGAttributeCreation;
-    static std::map<std::string, std::function<std::shared_ptr<SVGVisualProperty>(IAmGroot* aroot, const XmlAttributeCollection&)>> gSVGPropertyCreation;
-    
-	static void registerSVGAttribute(const std::string& name, std::function<std::shared_ptr<SVGVisualProperty>(const ByteSpan&)> func)
-	{
-		gSVGAttributeCreation[name] = func;
-	}
 
-    static void registerSVGProperty(const std::string& name, std::function < std::shared_ptr<SVGVisualProperty>(IAmGroot* aroot, const XmlAttributeCollection&)> func)
+    //===================================================
+    // Handling attribute conversion to properties
+    // 
+    // Collection of property constructors
+    using SVGAttributeToPropertyConverter = std::function<std::shared_ptr<SVGVisualProperty>(const XmlAttributeCollection& attrs)>;
+    using SVGPropertyConstructorMap = std::unordered_map<ByteSpan, SVGAttributeToPropertyConverter, ByteSpanHash, ByteSpanEquivalent>;
+
+
+    static SVGPropertyConstructorMap & getPropertyConstructionMap()
     {
-        gSVGPropertyCreation[name] = func;
+        static SVGPropertyConstructorMap gSVGAttributeCreation{};
+        
+        return gSVGAttributeCreation;
     }
-    
+
+    // Convenient function to register property constructors
+    static void registerSVGAttribute(const ByteSpan& name, SVGAttributeToPropertyConverter func)
+    {
+        getPropertyConstructionMap()[name] = func;
+    }
+
+    static SVGAttributeToPropertyConverter getAttributeConverter(const ByteSpan &name)
+    {
+        // Next, see if there is a property registered for the attribute
+        auto & mapper = getPropertyConstructionMap();
+        auto it = mapper.find(name);
+        if (it != mapper.end())
+        {
+            return it->second;
+        }
+
+        return nullptr;
+    }
 }
 
 
 
+
+
 namespace waavs {
-    //
-    // SVGVisualNode
-    // This is any object that will change the state of the rendering context
-    // that's everything from paint that needs to be applied, to geometries
-    // that need to be drawn, to line widths, text alignment, and the like.
-    // Most things, other than basic attribute type, will be a sub-class of this
-    struct SVGVisualNode : public SVGViewable
+    // Interface Am Graphics Root (IAmGroot) 
+    // Core interface to hold document level state, primarily
+    // for the purpose of looking up nodes, but also for style sheets
+    struct IAmGroot
     {
-        // Xml Node stuff
-        std::unordered_map<std::string, std::shared_ptr<SVGVisualProperty>> fVisualProperties{};
-
-        bool fIsStructural{ true };
-
-
-        BLMatrix2D fTransform{};
-		BLMatrix2D fTransformInverse{};
-        bool fHasTransform{ false };
+        std::unordered_map<ByteSpan, std::shared_ptr<IViewable>, ByteSpanHash, ByteSpanEquivalent> fDefinitions{};
+        std::unordered_map<ByteSpan, ByteSpan, ByteSpanHash, ByteSpanEquivalent> fEntities{};
         
-
-        SVGVisualNode(IAmGroot* aroot)
-            : SVGViewable(aroot)
-        {
-            needsBinding(true);
-        }
-
-        SVGVisualNode(const SVGVisualNode& other) = delete;
-        SVGVisualNode& operator=(const SVGVisualNode& rhs) = delete;
-
-        // signal all properties they should
-        // update themselves
-        virtual void updateProperties()
-        {
-            for (auto& prop : fVisualProperties)
-            {
-                prop.second->update();
-            }
-        }
         
-        virtual void updateSelf()
+        virtual void addElementReference(const ByteSpan& name, std::shared_ptr<IViewable> obj)
         {
-            ;
-        }
-        
-        void update() override
-        {
-            updateProperties();
-            updateSelf();
+            fDefinitions[name] = obj;
         }
 
-        bool isStructural() const { return fIsStructural; }
-        void isStructural(bool aStructural) { fIsStructural = aStructural; }
-
-
-        void moveTo(double x, double y) override
+        virtual std::shared_ptr<IViewable> getElementById(const ByteSpan& name)
         {
-            // BUGBUG - this moveTo should not do this transform??
-            // should move the frame??
-            //fTransform.reset();
-            fTransform.translate(x, y);
-        }
-
-        bool contains(double x, double y) override
-        {
-            BLPoint localPoint(x, y);
-
-            // check to see if we have a transform property
-            // if we do, transform the points through that transform
-            // then check to see if the point is inside the transformed path
-            if (fHasTransform)
-            {
-                // get the inverse transform
-                auto inverse = fTransform;
-                inverse.invert();
-                localPoint = inverse.mapPoint(localPoint);
-            }
-
-			return containsRect(frame(), localPoint);
-        }
-        
-        virtual SVGVisualNode* nodeAt(double x, double y)
-        {
-            if (contains(x, y))
-                return this;
-
-            return nullptr;
-        }
-
-        virtual void bindPropertiesToGroot(IAmGroot* groot)
-        {
-            // This requires lookups, so if we don't have a root()
-            // we need to return immediately
-            // Maybe this should occur in bind to groot?
-            if (nullptr == groot) {
-                printf("SVGVisualNode::bindPropertiesToGroot, ERROR - NO ROOT()\n");
-                return;
-            }
-            
-            
-            // Handle the class attribute if there is one
-            // The class attribute can be a whitespace separated list
-            // of class names, so we need to lookup each selector
-            // and turn whatever we find there into an attribute list
-            // and load them.
-            // BUGBUG - need to parse full class selector
-            // Assume multiple simple words for a first go
-            ByteSpan classChunk = getAttribute("class");
-            while (classChunk)
-            {
-                // peel a word off the front
-                auto aWord = chunk_token(classChunk, xmlwsp);
-                auto classId = toString(aWord);
-
-                auto csel = root()->styleSheet()->getClassSelector(classId);
-                if (csel != nullptr)
-                {
-                    loadVisualProperties(csel->attributes());
-				}
-                else {
-                    printf("SVGVisualNode::bindPropertiesToGroot, ERROR - NO CLASS SELECTOR FOR %s\n", classId.c_str());
-                }
-            }
-            
-            
-            // See if there's an element selector for the current element
-            // Deal with any more attributes that need special handling
-            // BUGBUG - This came from SetCommonVisualProperties, 
-            // so put it back there if this doesn't work out
-            if (!name().empty())
-            {
-                auto esel = root()->styleSheet()->getElementSelector(name());
-                if (esel != nullptr)
-                {
-                    loadVisualProperties(esel->attributes());
-                }
-            }
-            
-            // Check for id selector if we have one
-            // These
-			auto id = getAttribute("id");
-			if (id)
-			{
-				auto idsel = root()->styleSheet()->getIDSelector(toString(id));
-				if (idsel != nullptr)
-				{
-					loadVisualProperties(idsel->attributes());
-				}
-			}
-            
-            
-            // Bind all the accumulated visual properties
-			for (auto& prop : fVisualProperties)
-			{
-				prop.second->bindToGroot(groot);
-			}
-        }
-        
-        void bindToGroot(IAmGroot* groot) override
-        {
-            fRoot = groot;
-            bindPropertiesToGroot(groot);
-            needsBinding(false);
-        }
-
-        std::shared_ptr<SVGVisualProperty> getVisualProperty(const std::string& name)
-        {
-            auto it = fVisualProperties.find(name);
-            if (it != fVisualProperties.end())
+            auto it = fDefinitions.find(name);
+            if (it != fDefinitions.end())
                 return it->second;
 
-            return nullptr;
-        }
+            //printf("SVGDocument::getElementById, FAIL: ");
+            //printChunk(name);
 
-        //
-        // setAttribute
-        // 
-        // Allows setting any attribute on the element
-        // The 'name', is the name of the attribute to be set
-        // the 'value', is a span, that contains a raw string to be parsed to set the value
-        //
-        virtual void setAttribute(const std::string& name, const ByteSpan& value)
-        {
-            // If the value is nothing, then don't set it
-            if (!value)
-                return;
-            
-            if (gSVGAttributeCreation.find(name) != gSVGAttributeCreation.end())
-            {
-                auto prop = gSVGAttributeCreation[name](value);
-                if (prop)
-                {
-                    fVisualProperties[name] = prop;
-                }
-            }
-        }
-
-        //
-        // loadVisualProperties
-        // 
-        // This might be called multiple times on an element
-        // once for the regular attributes
-        // a second time for attributes hidden in a 'style' attribute
-        //
-        virtual void loadVisualProperties(const XmlAttributeCollection & attrCollection)
-        {
-            ByteSpan display = attrCollection.getAttribute("display");
-            if (display)
-            {
-                display = chunk_trim(display, xmlwsp);
-
-                if (display == "none")
-                    visible(false);
-            }
-
-            if (attrCollection.getAttribute("transform"))
-            {
-                fHasTransform = parseTransform(attrCollection.getAttribute("transform"), fTransform);
-                if (fHasTransform)
-                {
-                    // create the inverse transform for subsequent
-                    // UI interaction
-                    fTransformInverse = fTransform;
-					fTransformInverse.invert();
-                }
-            }
-            
-            // Run through the attributes passed in 
-            // add them into our attributes 
-            for (auto& attr : attrCollection.fAttributes)
-            {
-				setAttribute(attr.first, attr.second);
-            }
-
-			// BUGBUG - this is a hack to get the fill and stroke
-            // It needs to go deeper and get the color attribute that's from the tree
-            // where the current node is just the latest.
-            // if there is a stroke attribute with a value of 'currentColor', then look
-			// for a 'color' attribute, and set the stroke color to that value
-			auto strokeColor = attrCollection.getAttribute("stroke");
-            auto fillColor = attrCollection.getAttribute("fill");
-            if (strokeColor && (strokeColor == "currentColor"))
-            {
-                auto colorValue = attrCollection.getAttribute("color");
-                if (colorValue)
-                {
-                    setAttribute("stroke", colorValue);
-                }
-            }
-        }
-        
-        // Assuming we've already scanned our attributes
-        // do further processing with them
-        void setCommonVisualProperties()
-        {
-            // BUGBUG - need to decide order of precedence for presentation attributes
-            // load the common stuff that doesn't require
-            // any additional processing
-            loadVisualProperties(*this);
-
-            
-            // Handle the inline style attribute separately by turning
-            // it into an XmlAttributeCollection, and processing the same
-            // as the other attributes.
-            // Anything in the 'style' attribute supersedes any values that
-            // were in presentation attributes
-
-            ByteSpan styleChunk = getAttribute("style");
-
-            if (styleChunk) {
-				XmlAttributeCollection styleAttributes;
-
-                parseStyleAttribute(styleChunk, styleAttributes);
-				loadVisualProperties(styleAttributes);
-            }
-            
-        }
-
-
-        // Contains styling attributes
-        virtual void applyAttributes(IRenderSVG* ctx)
-        {
-            // Apply transform if it's not the identity transform
-            if (fHasTransform)  //fTransform.type() != BL_MATRIX2D_TYPE_IDENTITY)
-                ctx->applyTransform(fTransform);
-
-            // BUGBUG - It might be useful to pass in the visual object
-            // as additional context for attributes such as gradients
-            // that might need that
-            for (auto& prop : fVisualProperties) {
-                // BUGBUG - drawing visual property
-				if (prop.second->autoDraw() && prop.second->isSet())
-                    prop.second->draw(ctx);
-            }
-        }
-
-
-
-
-        virtual void drawSelf(IRenderSVG* ctx)
-        {
-            ;
-        }
-
-        void draw(IRenderSVG* ctx) override
-        {
-            //printf("SVGVisualNode::draw(%s)\n", id().c_str());
-            
-            if (!visible())
-                return;
-
-            ctx->push();
-
-            
-            // Do the actual drawing
-            applyAttributes(ctx);
-            drawSelf(ctx);
-            
-            ctx->pop();
-        }
-
-        void loadFromXmlElement(const XmlElement & elem) override
-        {
-			SVGViewable::loadFromXmlElement(elem);
-
-			setCommonVisualProperties();
+            return {};
         }
         
 
+        // Load a URL Reference
+        virtual std::shared_ptr<IViewable> findNodeByHref(const ByteSpan& inChunk)
+        {
+            ByteSpan str = inChunk;
 
-        //void mouseEvent(const MouseEvent& e) override
-        //{
-        //  ; // do nothing by default
-        //}
+            auto id = chunk_trim(str, chrWspChars);
 
+            // The first character could be '.' or '#'
+            // so we need to skip past that
+            if (*id == '.' || *id == '#')
+                id++;
+
+            if (!id)
+                return nullptr;
+
+            // lookup the thing we're referencing
+            return this->getElementById(id);
+        }
+        
+        //virtual std::shared_ptr<SVGViewable> findNodeByUrl(const ByteSpan& inChunk) = 0;
+        // Load a URL reference, including the 'url(' function indicator
+        virtual std::shared_ptr<IViewable> findNodeByUrl(const ByteSpan& inChunk)
+        {
+            ByteSpan str = inChunk;
+
+            // the id we want should look like this
+            // url(#id)
+            // so we need to skip past the 'url(#'
+            // and then find the closing ')'
+            // and then we have the id
+            auto url = chunk_token(str, "(");
+            auto id = chunk_trim(chunk_token(str, ")"), chrWspChars);
+
+            // sometimes the id is quoted
+            // so trim that as well
+            id = chunk_trim(id, "\"");
+            id = chunk_trim(id, "'");
+
+            return this->findNodeByHref(id);
+        }
+        
+
+        // Entities for entity expansion
+        virtual void addEntity(const ByteSpan& name, ByteSpan expansion)
+        {
+            fEntities[name] = expansion;
+        }
+        
+        virtual ByteSpan findEntity(const ByteSpan& name)
+        {
+            auto it = fEntities.find(name);
+            if (it != fEntities.end())
+                return it->second;
+
+            //printf("SVGDocument::findEntity(), FAIL: ");
+            //printChunk(name);
+
+            return ByteSpan{};
+        }
+
+        // IAmGroot
+        virtual FontHandler* fontHandler() const = 0;
+
+        virtual std::shared_ptr<CSSStyleSheet> styleSheet() = 0;
+        virtual void styleSheet(std::shared_ptr<CSSStyleSheet> sheet) = 0;
+
+
+
+        virtual ByteSpan systemLanguage() { return "en"; } // BUGBUG - What a big cheat!!
+
+        virtual double canvasWidth() const = 0;
+        virtual double canvasHeight() const = 0;
+        
+        virtual double dpi() const = 0;
+        virtual void dpi(const double d) = 0;
+    };
+
+}
+
+namespace waavs {
+    struct ISVGElement : public IViewable 
+    {
+        bool fIsStructural{ true };
+        
+        
+       virtual  std::shared_ptr<SVGVisualProperty> getVisualProperty(const ByteSpan& name) = 0;
+
+       bool isStructural() const { return fIsStructural; }
+       void isStructural(bool aStructural) { fIsStructural = aStructural; }
+       
     };
 }
 
-
-
 namespace waavs {
-    // compound node creation dispatch - 'g', 'symbol', 'pattern', 'linearGradient', 'radialGradient', 'conicGradient', 'image', 'style', 'text', 'tspan', 'use'
-    static std::map<std::string, std::function<std::shared_ptr<SVGVisualNode>(IAmGroot* aroot, XmlElementIterator& iter)>> gSVGGraphicsElementCreation{};
-
     // Geometry node creation dispatch
-    static std::map<std::string, std::function<std::shared_ptr<SVGVisualNode>(IAmGroot* root, const XmlElement& elem)>> gShapeCreationMap{};
+    // Creating from a singular element
+    using ShapeCreationMap = std::unordered_map<ByteSpan, std::function<std::shared_ptr<ISVGElement>(IAmGroot* root, const XmlElement& elem)>, ByteSpanHash, ByteSpanEquivalent>;
+
+    // compound node creation dispatch - 'g', 'symbol', 'pattern', 'linearGradient', 'radialGradient', 'conicGradient', 'image', 'style', 'text', 'tspan', 'use'
+    using SVGContainerCreationMap = std::unordered_map<ByteSpan, std::function<std::shared_ptr<ISVGElement>(IAmGroot* aroot, XmlElementIterator& iter)>, ByteSpanHash, ByteSpanEquivalent>;
+
+
+
+
+
+
+    static ShapeCreationMap& getSVGSingularCreationMap()
+    {
+        static ShapeCreationMap gShapeCreationMap{};
+
+        return gShapeCreationMap;
+    }
+
+    static SVGContainerCreationMap& getSVGContainerCreationMap()
+    {
+        static SVGContainerCreationMap gSVGGraphicsElementCreation{};
+
+        return gSVGGraphicsElementCreation;
+    }
+
+
+    // Register named creation routines
+    static void registerSVGSingularNode(const ByteSpan& name, std::function<std::shared_ptr<ISVGElement>(IAmGroot* root, const XmlElement& elem)> func)
+    {
+        getSVGSingularCreationMap()[name] = func;
+    }
+
+    static void registerContainerNode(const ByteSpan& name, std::function<std::shared_ptr<ISVGElement>(IAmGroot* aroot, XmlElementIterator& iter)> creator)
+    {
+        getSVGContainerCreationMap()[name] = creator;
+    }
+
+
+
+    // Convenience way to create an element
+    static std::shared_ptr<ISVGElement> createSingularNode(const XmlElement& elem, IAmGroot* root)
+    {
+        ByteSpan aname = elem.name();
+        auto it = getSVGSingularCreationMap().find(aname);
+        if (it != getSVGSingularCreationMap().end())
+        {
+            return it->second(root, elem);
+        }
+        return nullptr;
+    }
+
+    static std::shared_ptr<ISVGElement> createContainerNode(XmlElementIterator& iter, IAmGroot* root)
+    {
+        ByteSpan aname = iter->name();
+        auto it = getSVGContainerCreationMap().find(aname);
+        if (it != getSVGContainerCreationMap().end())
+        {
+            return it->second(root, iter);
+        }
+        return nullptr;
+    }
 }
 
 
+
+
 namespace waavs {
-
-
 
     //================================================
     // SVGGraphicsElement
     //================================================
-    struct SVGGraphicsElement : public SVGVisualNode
+    struct SVGGraphicsElement : public ISVGElement
     {
         static constexpr int BUILD_STATE_INITIAL = 0;
         static constexpr int BUILD_STATE_OPEN = 1;
         static constexpr int BUILD_STATE_CLOSE = 2;
 
-
-        std::vector<std::shared_ptr<SVGVisualNode>> fNodes{};
-
         int buildState = BUILD_STATE_OPEN;
+        BLVar fVar{};
 
-        SVGGraphicsElement(IAmGroot* aroot)
-            :SVGVisualNode(aroot) {}
+        XmlAttributeCollection fPresentationAttributes{};
+        XmlAttributeCollection fAttributes;
 
-        virtual void bindChildrenToGroot(IAmGroot* groot)
-        {
-			for (auto& node : fNodes)
-			{
-				node->bindToGroot(groot);
-			}
-        }
+        ByteSpan fAttributeSpan{};
+        ByteSpan fStyleAttribute{};
+        ByteSpan fClassAttribute{};
+
+		BLMatrix2D fTransform{};
+		bool fHasTransform{ false };
         
-        // For compound nodes (which have children) we want to 
-        // do the base stuff (binding properties) then bind the children
-		// If you sub-class this, you should call this first
-        // then do your own thing.  We don't want to call a 'bindSelfToGroot'
-        // here, because that complicates the interactions and sequences of things
-        // so just override bindToGroot
-        void bindToGroot(IAmGroot* groot) override
+        std::unordered_map<ByteSpan, std::shared_ptr<SVGVisualProperty>, ByteSpanHash, ByteSpanEquivalent> fVisualProperties{};
+        std::vector<std::shared_ptr<IViewable>> fNodes{};
+
+
+
+
+        SVGGraphicsElement()
         {
-			SVGVisualNode::bindToGroot(groot);
-            bindChildrenToGroot(groot);
+            needsBinding(true);
         }
 
-
-        const BLVar& getVariant() override
+        const BLVar getVariant(IRenderSVG *ctx, IAmGroot *groot) noexcept override
         {
             // if our variant is null
             // traverse down our fNodes, until we find
@@ -630,10 +448,10 @@ namespace waavs {
             {
                 for (auto& node : fNodes)
                 {
-                    auto& var = node->getVariant();
+                    auto& var = node->getVariant(ctx, groot);
                     if (!var.isNull())
                     {
-                        return node->getVariant();
+                        return node->getVariant(ctx, groot);
                     }
                 }
             }
@@ -661,157 +479,165 @@ namespace waavs {
 
             return extent;
         }
+        BLRect getBBox() const override { return BLRect{}; }
+        
 
 
-        // Find the topmost node at a given position
-        SVGVisualNode* nodeAt(double x, double y) override
+
+        bool hasAttribute(const ByteSpan& key) const noexcept { return fAttributes.hasAttribute(key); }
+
+        ByteSpan getAttribute(const ByteSpan& key) const noexcept
         {
-            // traverse through windows in reverse order
-            // return when one of them contains the mouse point
-            std::vector<std::shared_ptr<SVGVisualNode> >::reverse_iterator rit = fNodes.rbegin();
-            for (rit = fNodes.rbegin(); rit != fNodes.rend(); ++rit)
-            {
-                // if the node is not visible, skip it
-                if (!(*rit)->visible())
-                    continue;
-
-                auto anode = (*rit)->nodeAt(x, y);
-                if (anode != nullptr)
-                {
-                    // If the node does not have an ID, then return the containing node
-                    // instead
-                    if (anode->id() == "")
-                        return this;
-
-                    return anode;
-                }
-            }
-
-            // if the coordinates don't match one of our children
-            // then if we're a container, return ourselves, if the
-            // we contain the coordinates, otherwise return null
-            if (contains(x, y))
-                return this;
-            else
-                return nullptr;
-        }
-
-        void updateSelf() override
-        {
-			for (auto& node : fNodes)
-			{
-				node->update();
-			}
+            return fAttributes.getAttribute(key);
         }
         
-        virtual void drawChildren(IRenderSVG* ctx)
+		void setAttribute(const ByteSpan& key, const ByteSpan& value) noexcept
+		{
+			fAttributes.addAttribute(key,value);
+		}
+
+        std::shared_ptr<SVGVisualProperty> getVisualProperty(const ByteSpan& name)
         {
-			for (auto& node : fNodes) {
-				node->draw(ctx);
-			}
+            auto it = fVisualProperties.find(name);
+            if (it != fVisualProperties.end())
+                return it->second;
+
+            return nullptr;
         }
+
         
-        void draw(IRenderSVG *ctx) override
+        virtual bool addNode(std::shared_ptr < ISVGElement > node, IAmGroot* groot)
         {
-            if (!visible())
-                return;
-
-            ctx->push();
-
-            applyAttributes(ctx);
-            drawSelf(ctx);
-            
-            drawChildren(ctx);
-
-
-            ctx->pop();
-        }
-    
-        virtual void addNode(std::shared_ptr < SVGVisualNode > node)
-        {
-            if (node == nullptr)
-                return;
+            if (node == nullptr || groot == nullptr)
+                return false;
 
             if (!node->id().empty())
-                root()->addDefinition(node->id(), node);
+                groot->addElementReference(node->id(), node);
 
             if (node->isStructural()) {
                 fNodes.push_back(node);
             }
+
+            return true;
         }
 
-        virtual void loadSelfClosingNode(const XmlElement& elem)
+        virtual void loadSelfClosingNode(const XmlElement& elem, IAmGroot* groot)
         {
             //printf("SVGGraphicsElement::loadSelfClosingNode: \n");
 
-            auto it = gShapeCreationMap.find(elem.name());
-            if (it != gShapeCreationMap.end())
-            {
-                auto node = it->second(root(), elem);
-                addNode(node);
+            auto anode = createSingularNode(elem, groot);
+            if (anode != nullptr) {
+                this->addNode(anode, groot);
             }
             else {
-                printf("SVGGraphicsElement::loadSelfClosingNode UNKNOWN[%s]\n", elem.name().c_str());
+                //printf("SVGGraphicsElement::loadSelfClosingNode UNKNOWN[%s]\n", toString(elem.name()).c_str());
                 //printXmlElement(elem);
             }
         }
 
+        virtual void loadEndTag(const XmlElement&, IAmGroot*)
+        {
+            //printf("SVGGraphicsElement::loadEndTag [%s]\n", toString(elem.name()).c_str());
+        }
 
-        virtual void loadContentNode(const XmlElement& elem)
+        virtual void loadContentNode(const XmlElement&, IAmGroot*)
         {
             //printf("SVGCompountNode::loadContentNode\n");
             //printXmlElement(elem);
             // Do something with content nodes	
         }
 
-        virtual void loadCDataNode(const XmlElement& elem)
+        virtual void loadCDataNode(const XmlElement&, IAmGroot*)
         {
             //printf("SVGGraphicsElement::loadCDataNode\n");
             //printXmlElement(elem);
             // Do something with CDATA nodes
         }
 
-        virtual void loadComment(const XmlElement& elem)
+        virtual void loadComment(const XmlElement&, IAmGroot*)
         {
-			//printf("SVGGraphicsElement::loadComment\n");
-			//printXmlElement(elem);
-			// Do something with comments
+            //printf("SVGGraphicsElement::loadComment\n");
+            //printXmlElement(elem);
+            // Do something with comments
         }
-        
-        virtual  void loadCompoundNode(XmlElementIterator& iter)
-        {
-            const XmlElement& elem = *iter;
 
+        virtual  void loadCompoundNode(XmlElementIterator& iter, IAmGroot* groot)
+        {
             // Add a child, and call loadIterator
             // If the name of the element is found in the map,
             // then create a new node of that type and add it
             // to the list of nodes.
-			auto aname = elem.name();
-            if (gSVGGraphicsElementCreation.find(aname) != gSVGGraphicsElementCreation.end())
-            {
-                auto& func = gSVGGraphicsElementCreation[aname];
-                auto node = func(root(), iter);
-                addNode(node);
+            auto node = createContainerNode(iter, groot);
+            if (node != nullptr) {
+                this->addNode(node, groot);
             }
             else {
-                printf("SVGGraphicsElement::loadCompoundNode == UNKNOWN ==> '%s'\n", aname.c_str());
-                //printXmlElement(elem);
-                auto node = gSVGGraphicsElementCreation["g"](root(), iter);
-                // don't add the node to the tree as we don't
-                // know what it is, so ignore it
-                //addNode(node);
+                auto node = getSVGContainerCreationMap()["g"](groot, iter);
             }
+
         }
 
 
+        // loadFromXmlElement()
+        // 
+        // At this stage, we're interested in preserving the data associated
+        // with the attributes, but not necessarily parsing all the attributes,
+        // because we don't have enough information to actually resolve them 
+        // all, until the document is fully built.
+        // Here, we capture the element name, and the ID field if it exists
+        // and the attribute spans for later processing.
+        // We explicitly separate out 'id', 'class', 'style', and the rest of the presentation attributes
+        // It's in 'fixupSelfStyleAttributes()', that we actuall bind attributes
+        // to actual fixed values.
+        
+        virtual void loadFromXmlElement(const XmlElement& elem, IAmGroot* groot)
+        {
+            // Save the name if we've got one
+            name(elem.name());
 
-        virtual void loadFromXmlIterator(XmlElementIterator& iter) override
+            // Get the span for all the presentation attributes on the element to start
+            fAttributeSpan = elem.data();
+
+            // Scan the list of attributes, separating out the id, style and class attributes
+
+            // since the readNextKeyAttribute() function is destructive of the span
+            // we need to make a copy of the span to work with
+            ByteSpan src = elem.data();
+
+            // Create a couple of spans to hold the name and value
+            // pairs.  These will be reused on each iteration
+            ByteSpan attrName{};
+            ByteSpan attrValue{};
+
+            // Loop through the attributes
+            while (readNextKeyAttribute(src, attrName, attrValue))
+            {
+                if (attrName == "id")
+                {
+                    id(attrValue);
+                }
+                else if (attrName == "style")
+                {
+                    fStyleAttribute = attrValue;
+                }
+                else if (attrName == "class")
+                {
+                    fClassAttribute = attrValue;
+                }
+                else {
+                    fPresentationAttributes.addAttribute(attrName, attrValue);
+                }
+            }
+
+        }
+        
+
+        virtual void loadFromXmlIterator(XmlElementIterator& iter, IAmGroot* groot)
         {
             // First, loadFromXmlElement because we're sitting on our opening element
             // and we need to gather our own attributes
-            loadFromXmlElement(*iter);
-
-
+            this->loadFromXmlElement(*iter, groot);
+            
             buildState = BUILD_STATE_OPEN;
 
             while (iter && (buildState != BUILD_STATE_CLOSE))
@@ -841,34 +667,38 @@ namespace waavs {
                 case BUILD_STATE_OPEN:
                 {
                     if (elem.isSelfClosing()) {
-                        loadSelfClosingNode(elem);
+                        this->loadSelfClosingNode(elem, groot);
                     }
                     else if (elem.isStart())
                     {
-                        loadCompoundNode(iter);
+                        this->loadCompoundNode(iter, groot);
                     }
                     else if (elem.isEnd())
                     {
                         // Close the current element
                         buildState = BUILD_STATE_CLOSE;
-                        //loadEndTag(elem);
+                        this->loadEndTag(elem, groot);
                     }
                     else if (elem.isContent())
                     {
-                        loadContentNode(elem);
+                        this->loadContentNode(elem, groot);
                     }
                     else if (elem.isCData())
                     {
-                        loadCDataNode(elem);
+                        this->loadCDataNode(elem, groot);
                     }
-					else if (elem.isComment())
-					{
-						loadComment(elem);
-					}
+                    else if (elem.isComment())
+                    {
+                        this->loadComment(elem, groot);
+                    }
                     else
                     {
                         // Ignore anything else
-                        printf("SVGGraphicsElement::loadFromXmlIterator ==> IGNORING: %s\n", elem.name().c_str());
+                        //printf("SVGGraphicsElement::loadFromXmlIterator ==> IGNORING kind(%d) name:", elem.kind());
+                        //printChunk(elem.nameSpan());
+                        //printChunk(elem.data());
+
+                        //printf("SVGGraphicsElement::loadFromXmlIterator ==> IGNORING: %s\n", elem.name().c_str());
                         //printXmlElement(elem);
                     }
                 }
@@ -879,6 +709,236 @@ namespace waavs {
 
             }
         }
+        
 
+        virtual void fixupSelfStyleAttributes(IRenderSVG*, IAmGroot*) 
+        {
+           // printf("fixupSelfStyleAttributes\n");
+        }
+
+
+        void fixupStyleAttributes(IRenderSVG* ctx, IAmGroot* groot) override
+        {
+            // First, lookup CSS based on tagname
+            // See if there's an element selector for the current element
+            if (groot != nullptr) {
+                if (!name().empty())
+                {
+                    auto esel = groot->styleSheet()->getElementSelector(name());
+                    if (esel != nullptr)
+                    {
+                        fAttributes.mergeAttributes(esel->attributes());
+                    }
+                }
+
+                // Check for id selector if we have one
+                if (id())
+                {
+                    auto idsel = groot->styleSheet()->getIDSelector(id());
+                    if (idsel != nullptr)
+                    {
+                        fAttributes.mergeAttributes(idsel->attributes());
+                    }
+                }
+
+                // Lookup any attributes based on the class, if specified
+                ByteSpan classChunk = fClassAttribute;
+                while (classChunk)
+                {
+                    // peel a word off the front
+                    auto classId = chunk_token(classChunk, chrWspChars);
+
+
+                    auto csel = groot->styleSheet()->getClassSelector(classId);
+                    if (csel != nullptr)
+                    {
+                        fAttributes.mergeAttributes(csel->attributes());
+                    }
+                    else {
+                        //printf("SVGVisualNode::bindPropertiesToGroot, ERROR - NO CLASS SELECTOR FOR %s\n", toString(classId).c_str());
+                    }
+                }
+            }
+
+            // Upsert any of the attributes associated with 'style' attribute if they exist
+            if (fStyleAttribute) {
+                parseStyleAttribute(fStyleAttribute, fAttributes);
+            }
+
+            // Finally, override any of the attributes already set with the 
+            // presentation attributes of the current element, if any
+            fAttributes.mergeAttributes(fPresentationAttributes);
+
+            // BUGBUG - this is a hack to get the fill and stroke
+            // It needs to go deeper and get the color attribute that's from the tree
+            // where the current node is just the latest.
+            // if there is a stroke attribute with a value of 'currentColor', then look
+            // for a 'color' attribute, and set the stroke color to that value
+            //auto strokeColor = fAttributes.getAttribute("stroke");
+
+            //if (strokeColor && (strokeColor == "currentColor"))
+            //{
+            //    auto colorValue = fAttributes.getAttribute("color");
+            //    if (colorValue)
+            //    {
+            //        fAttributes.addAttribute("stroke", colorValue);
+            //    }
+            //}
+            this->fixupSelfStyleAttributes(ctx, groot);
+
+            // Use up some of the attributes
+            ByteSpan display = fAttributes.getAttribute("display");
+            if (display)
+            {
+                display = chunk_trim(display, chrWspChars);
+
+                if (display == "none")
+                    visible(false);
+            }
+
+            // Get transformation matrix if it exists as early as possible
+            // but after attributes have been set.
+            fHasTransform = parseTransform(getAttribute("transform"), fTransform);
+
+        }
+        
+        // IViewable
+
+
+
+        
+
+
+        // signal all properties they should
+        // update themselves
+        virtual void updateProperties(IAmGroot* groot)
+        {
+            for (auto& prop : fVisualProperties)
+            {
+                prop.second->update(groot);
+            }
+        }
+
+        void updateChildren(IAmGroot* groot)
+        {
+            for (auto& node : fNodes)
+            {
+                node->update(groot);
+            }
+        }
+
+        virtual void updateSelf(IAmGroot* groot) {
+
+        }
+        
+        void update(IAmGroot* groot) override
+        {
+            this->updateProperties(groot);
+            this->updateSelf(groot);
+            this->updateChildren(groot);
+        }
+        
+
+
+        
+        // convertAttributesToProperties
+        // Take the step of converting a raw attribute
+        // value into a specific display property if a routine
+        // exists for it.
+        void convertAttributesToProperties(IRenderSVG* ctx, IAmGroot* groot)
+        {
+            //
+            for (auto& attr : fAttributes.attributes())
+            {
+                // Find an attribute to property converter, if it exists
+                auto propertyMapper = getAttributeConverter(attr.first);
+                if (propertyMapper)
+                {
+                    auto prop = propertyMapper(fAttributes);
+                    if (prop != nullptr)
+                        fVisualProperties[attr.first] = prop;
+                }
+            }
+        }
+
+        virtual void bindSelfToContext(IRenderSVG*, IAmGroot*) { ; }
+
+
+        // For compound nodes (which have children) we want to 
+        // do the base stuff (binding properties) then bind the children
+        // If you sub-class this, you should call this first
+        // then do your own thing.  We don't want to call a 'bindSelfToGroot'
+        // here, because that complicates the interactions and sequences of things
+        // so just override bindToGroot
+        void bindToContext(IRenderSVG* ctx, IAmGroot* groot) noexcept override
+        {
+            this->fixupStyleAttributes(ctx, groot);
+            convertAttributesToProperties(ctx, groot);
+
+            this->bindSelfToContext(ctx, groot);
+
+            needsBinding(false);
+        }
+
+        virtual void applyProperties(IRenderSVG* ctx, IAmGroot* groot)
+        {
+            // Apply transform if it's not the identity transform
+            if (fHasTransform)  //fTransform.type() != BL_MATRIX2D_TYPE_IDENTITY)
+                ctx->applyTransform(fTransform);
+
+            for (auto& prop : fVisualProperties) {
+                if (prop.second->autoDraw() && prop.second->isSet())
+                    prop.second->draw(ctx, groot);
+            }
+        }
+
+        virtual void drawChildren(IRenderSVG* ctx, IAmGroot* groot)
+        {
+            for (auto& node : fNodes) {
+                // Restore our context before drawing each child
+                ctx->objectFrame(getBBox());
+
+                node->draw(ctx, groot);
+            }
+        }
+        
+        
+        virtual void drawSelf(IRenderSVG*, IAmGroot*)
+        {
+            ;
+        }
+        
+        
+        void draw(IRenderSVG* ctx, IAmGroot* groot) override
+        {
+            if (!visible())
+                return;
+
+            ctx->push();
+
+            if (needsBinding())
+                this->bindToContext(ctx, groot);
+            
+            // Should have valid bounding box by now
+            // so set objectFrame on the context
+			ctx->objectFrame(getBBox());
+            
+            this->applyProperties(ctx, groot);
+            this->drawSelf(ctx, groot);
+
+            this->drawChildren(ctx, groot);
+
+            ctx->pop();
+        }
     };
 }
+
+
+
+
+
+
+
+
+
+#endif

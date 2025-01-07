@@ -1,6 +1,7 @@
 #pragma once
 
 #include <bitset>
+#include "definitions.h"
 
 namespace waavs {
 
@@ -27,23 +28,24 @@ namespace waavs {
 		std::bitset<256> bits;
 
 		// Common Constructors
-		explicit charset(const char achar) { addChar(achar); }
-		charset(const char* chars) { addChars(chars); }
-		charset(const charset& aset) { addCharset(aset); }
+		constexpr charset() noexcept = default;
+		explicit charset(const char achar) noexcept { addChar(achar); }
+		charset(const char* chars) noexcept { addChars(chars); }
+		charset(const charset& aset) noexcept { addCharset(aset); }
 
 		
 		// Convenience methods for adding and removing characters
 		// in the set
 		
 		// Add a single character to the set
-		charset& addChar(const char achar)
+		charset& addChar(const char achar) noexcept
 		{
 			bits.set(achar);
 			return *this;
 		}
 
 		// Add a range of characters to the set
-		charset& addChars(const char* chars)
+		charset& addChars(const char* chars) noexcept
 		{
 			const char* s = chars;
 			while (0 != *s)
@@ -51,20 +53,20 @@ namespace waavs {
 			return *this;
 		}
 
-		charset& addCharset(const charset& aset)
+		charset& addCharset(const charset& aset) noexcept
 		{
 			bits |= aset.bits;
 			return *this;
 		}
 
 		// Methods for removing characters from the set
-		charset& removeChar(const char achar)
+		charset& removeChar(const char achar) noexcept
 		{
 			bits.reset(achar);
 			return *this;
 		}
 		
-		charset& removeChars(const char* chars)
+		charset& removeChars(const char* chars) noexcept
 		{
 			const char* s = chars;
 			while (0 != *s)
@@ -72,7 +74,7 @@ namespace waavs {
 			return *this;
 		}
 		
-		charset& removeCharset(const charset& aset)
+		charset& removeCharset(const charset& aset) noexcept
 		{
 			bits &= ~aset.bits;
 			return *this;
@@ -93,25 +95,57 @@ namespace waavs {
 		charset operator+(const char* chars) const noexcept { charset result(*this); return result.addChars(chars); }
 		charset operator+(const charset& aset) const noexcept { charset result(*this); return result.addCharset(aset); }
 		
-		charset operator-(const char achar) const { charset result(*this); result.removeChar(achar); return result; }
-		charset operator-(const char* chars) const { charset result(*this); result.removeChars(chars); return result; }
-		charset operator-(const charset& aset) const { charset result(*this); result.removeCharset(aset); return result; }
+		charset operator-(const char achar) const noexcept { charset result(*this); result.removeChar(achar); return result; }
+		charset operator-(const char* chars) const noexcept { charset result(*this); result.removeChars(chars); return result; }
+		charset operator-(const charset& aset) const noexcept { charset result(*this); result.removeCharset(aset); return result; }
 
 
 
+		// get an inverse of the set
+		charset operator~() const noexcept
+		{
+			charset result;
+			result.bits = ~bits;
+			return result;
+		}
+		
+		charset inverse() const noexcept
+		{
+			return ~(*this);
+		}
 		
 		// Checking for set membership
 		bool contains(const uint8_t idx) const noexcept { return bits[idx];}
 
 		// This one makes it look like an array
-		bool operator [](const size_t idx) const noexcept { return bits[idx]; }
+		constexpr bool operator [](const size_t idx) const noexcept { return bits[idx]; }
 
 		// This one makes it look like a function
-		bool operator ()(const size_t idx) const noexcept {return bits[idx];}
+		constexpr bool operator ()(const size_t idx) const noexcept {return bits[idx];}
 		
 		// operator^ is the union of two sets
-		charset operator^(const charset& other) const { charset result(*this); result.bits |= other.bits; return result; }
-		charset& operator^=(const charset& other) { bits |= other.bits; return *this; }
+		charset operator^(const charset& other) const noexcept { charset result(*this); result.bits |= other.bits; return result; }
+		charset& operator^=(const charset& other) noexcept { bits |= other.bits; return *this; }
 		
 	};
+	
+	// Some common character sets
+	static charset chrWspChars("\t\r\n\f\v ");          // whitespace characters
+	static charset chrAlphaChars("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+	static charset chrDecDigits("0123456789");
+	static charset chrHexDigits("0123456789ABCDEFabcdef");
+
+	static constexpr INLINE bool is_digit(const unsigned char c) noexcept { int diff = c - '0';  return ((diff>=0) && (diff<= 9)); }
+
+	static constexpr INLINE bool is_hex_digit(const unsigned char vIn) noexcept
+	{
+		if (vIn >= '0' && vIn <= '9')
+			return true;
+		else if (vIn >= 'a' && vIn <= 'f')
+			return true;
+		else if (vIn >= 'A' && vIn <= 'F')
+			return true;
+		else
+			return false;
+	}
 }

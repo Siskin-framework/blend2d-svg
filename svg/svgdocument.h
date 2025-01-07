@@ -1,7 +1,6 @@
 #pragma once
 
 // References
-// https://github.com/lemire/fastbase64
 // https://razrfalcon.github.io/notes-on-svg-parsing/index.html
 //
 // Notes
@@ -31,55 +30,136 @@
 
 
 #include "maths.h"
-#include "geometry.h"
 
+#include "svgcss.h"
+
+#include "svgclip.h"
+#include "svgconditional.h"
+#include "svggradient.h"
+#include "svgimage.h"
+#include "svgmarker.h"
+#include "svgmask.h"
+#include "svgstructure.h"
 #include "svgshapes.h"
+#include "svgstyle.h"
+#include "svgsymbol.h"
+#include "svgpattern.h"
 #include "svgfont.h"
 #include "svgfilter.h"
-#include "svgcss.h"
+#include "svghyperlink.h"
+
 #include "svgdrawingcontext.h"
 
 
 
 namespace waavs {
 
-    
-    struct SVGDocument : public ISVGDrawable, public IAmGroot
+    //
+    struct SVGDocument : public  SVGGraphicsElement, public IAmGroot 
     {
+        
+        MemBuff fSourceMem{};
+        
 		FontHandler* fFontHandler = nullptr;
         
+        // BUGBUG - this should go away
+        // Although there can be multiple <svg> elements in a document
+		// we track only the first one
+        // We only have a single root 'SVGSVGElement' for the whole document
         std::shared_ptr<SVGSVGElement> fSVGNode = nullptr;
+
+        
+        // We need a style sheet for the entire document
 		std::shared_ptr<CSSStyleSheet> fStyleSheet = nullptr;
         
         // IAmGroot
+        // Information about the environment
         double fDpi = 96;
         double fCanvasWidth{};
 		double fCanvasHeight{};
         
-        std::unordered_map<std::string, std::shared_ptr<SVGViewable>> fDefinitions{};
-        std::unordered_map<std::string, ByteSpan> fEntities{};
+        // Information from the document
+        double fDocumentWidth{};
+		double fDocumentHeight{};
+        
         
         
         //==========================================
         // Implementation
 		//==========================================
+        SVGDocument() = delete;
         
-        SVGDocument(FontHandler *fh)
-            :fFontHandler(fh)
+        SVGDocument(FontHandler *fh, const double w=0, const double h=0, const double ppi = 96)
+            :SVGGraphicsElement()
+            , fDpi(ppi)
+            , fFontHandler(fh)
+            , fCanvasWidth(w)
+            , fCanvasHeight(h)
         {
-            //fDpi = systemPpi;
-
-
+            // Create document style sheet that can be filled in
 			fStyleSheet = std::make_shared<CSSStyleSheet>();
         }
 
+        SVGDocument(const ByteSpan& srcChunk, const double w = 64, const double h = 64, const double ppi = 96, FontHandler* fh=nullptr)
+            :SVGGraphicsElement()
+            , fDpi(ppi)
+            , fFontHandler(fh)
+            , fCanvasWidth(w)
+            , fCanvasHeight(h)
+        {
+            resetFromSpan(srcChunk, fh, w, h, ppi);
+        }
+        
+        
+        void resetFromSpan(const ByteSpan& srcChunk, FontHandler* fh, const double w, const double h, const double ppi=96)
+        {
+            // clear out the old document
+            //clear();
+            fontHandler(fh);
+            dpi(ppi);
+            canvasSize(w, h);
+            fStyleSheet = std::make_shared<CSSStyleSheet>();
+
+            // load the new document
+            loadFromChunk(srcChunk, fh);
+        }
+        
+        
 		// Properties
 		FontHandler* fontHandler() const override { return fFontHandler; }
+        void fontHandler(FontHandler* fh) { fFontHandler = fh; }
         
         double dpi() const override { return fDpi; }
+		void dpi(const double d) override { fDpi = d; }
+        
 		double canvasWidth() const override { return fCanvasWidth; }
 		double canvasHeight() const override { return fCanvasHeight; }
+        void canvasSize(const double w, const double h) { fCanvasWidth = w; fCanvasHeight = h; }
         
+		BLRect frame() const override { return BLRect(0, 0, fCanvasWidth, fCanvasHeight); }
+        
+        // This should be size of document elements
+        BLRect getBBox() const override 
+        {
+            BLRect extent{};
+            bool firstOne = true;
+
+            // traverse the graphics
+            // expand bounding box to include their frames, without alternation
+            for (auto& g : fNodes)
+            {
+                if (firstOne) {
+                    extent = g->getBBox();
+                    firstOne = false;
+                }
+                else {
+					expandRect(extent, g->getBBox());
+                    //expandRect(extent, g->frame());
+                }
+            }
+
+            return extent;
+        }
         
         std::shared_ptr<CSSStyleSheet> styleSheet() override { return fStyleSheet; }
         void styleSheet(std::shared_ptr<CSSStyleSheet> sheet) override { fStyleSheet = sheet; }
@@ -87,120 +167,46 @@ namespace waavs {
 
         // retrieve root svg node
 		std::shared_ptr<SVGSVGElement> documentElement() const { return fSVGNode; }
-        
 
-        //=================================================================
-		// IAmGroot
-		//=================================================================
-        // Expand text that may have entities in it
-        // return true if there were any entities
-        bool expandText(const ByteSpan& txt, std::ostringstream& oss)
-        {
-            return false;
-        }
         
-        std::shared_ptr<SVGViewable> getElementById(const std::string& name) override
+        void draw(IRenderSVG * ctx, IAmGroot* groot) override
         {
-			if (fDefinitions.find(name) != fDefinitions.end())
-                return fDefinitions[name];
-
-		    printf("SVGDocument::getElementById, FAIL: %s\n", name.c_str());
+            ctx->setContainerFrame(frame());
             
-            return nullptr;
+            SVGGraphicsElement::draw(ctx, groot);
         }
+        
+        
+        
+        bool addNode(std::shared_ptr < ISVGElement > node, IAmGroot* groot) override
+        {            
+			if (!SVGGraphicsElement::addNode(node, groot))
+                return false;
 
-        // Load a URL Reference
-        std::shared_ptr<SVGViewable> findNodeByHref(const ByteSpan& inChunk) override
-        {
-            ByteSpan str = inChunk;
-
-            auto id = chunk_trim(str, xmlwsp);
-
-            // The first character could be '.' or '#'
-            // so we need to skip past that
-            if (*id == '.' || *id == '#')
-                id++;
-
-            if (!id)
-                return nullptr;
-
-            // lookup the thing we're referencing
-            std::string idStr = toString(id);
-
-            return getElementById(idStr);
-        }
-
-        // Load a URL reference, including the 'url(' function indicator
-        std::shared_ptr<SVGViewable> findNodeByUrl(const ByteSpan& inChunk)
-        {
-            ByteSpan str = inChunk;
-
-            // the id we want should look like this
-            // url(#id)
-            // so we need to skip past the 'url(#'
-            // and then find the closing ')'
-            // and then we have the id
-            auto url = chunk_token(str, "(");
-            auto id = chunk_trim(chunk_token(str, ")"), xmlwsp);
-
-			// sometimes the id is quoted
-            // so trim that as well
-			id = chunk_trim(id, "\"");
-			id = chunk_trim(id, "'");
             
-            return findNodeByHref(id);
-        }
-        
-        ByteSpan findEntity(const std::string& name) override
-        {
-			if (fEntities.find(name) != fEntities.end())
-				return fEntities[name];
+            if (node->name() == "svg")
+            {
 
-			return ByteSpan{};
-        }
-        
-        void addDefinition(const std::string& name, std::shared_ptr<SVGViewable> obj)
-        {
-            fDefinitions[name] = obj;
-        }
-        
-        virtual void addEntity(const std::string& name, ByteSpan expansion)
-        {
-            fEntities[name] = expansion;
-        }
+                if (nullptr == fSVGNode)
+                {
+                    fSVGNode = std::dynamic_pointer_cast<SVGSVGElement>(node);
+                    
+				}
 
-        void update() override
-        {
-			if (fSVGNode)
-				fSVGNode->update();
-        }
-        
-        void draw(IRenderSVG * ctx) override
-        {
-            if (nullptr == fSVGNode)
-                return;
-
-            //double startTime = seconds();
-            fSVGNode->draw(ctx);
-			//double endTime = seconds();
-
-			//printf("Drawing Duration: %f\n", endTime - startTime);
-        }
-        
-        BLRect sceneFrame() const
-        {
-            auto svgRoot = documentElement();
-            if (nullptr == svgRoot)
-                return {};
+            }
             
-            return svgRoot->viewport();
+            return true;
         }
-
         
+        
+
+        // loadFromXmlIterator
+        // 
         // Load the document from an XML Iterator
-        // Since this is the top level document, we just want to kick
-        // off loading the root node 'svg', and we're done 
-        void loadFromXmlIterator(XmlElementIterator& iter)
+        // Since this is the top level document, it will hold all the sub-elements.
+        // This document also acts as the "groot" (graphics root).  That means you 
+        // have to call bindToGroot() after successfully loading the document.
+        void loadFromXmlIterator(XmlElementIterator& iter, IAmGroot* groot) override
         {
 
             // skip past any elements that come before the 'svg' element
@@ -220,153 +226,103 @@ namespace waavs {
                     // break here, but, curiosity...
                     auto node = std::make_shared<SVGSVGElement>(this);
                     
-                    
                     if (nullptr != node) {
-                        node->loadFromXmlIterator(iter);
-
-                        if (fSVGNode == nullptr) {
-							fSVGNode = node;
-                            // Get the canvas width, height, viewbox, etc
-                            BLRect vport = fSVGNode->viewport();
-                            fCanvasWidth = vport.w;
-                            fCanvasHeight = vport.h;
-                        }
-
-                        node->bindToGroot(this);
+                        node->loadFromXmlIterator(iter, groot);
+                        addNode(node, groot);
                     }
                     else {
-                        printf("SVGDocument : ERROR - could not create SVG node\n");
+                        printf("SVGDocument.loadFromXmlIterator : ERROR - could not create SVG node\n");
                     }
+				}
+				else if (elem.isDoctype()) {
+
+                    //printf(" ====  DOCTYPE ====\n");
+                    // BUGBUG - We need more information on what kind
+                    // of DOCTYPE it was.
+                    // We only need to create an iterator if there is style information
+                    // or a set of entities.
+                    // 
+                    // create an xmlelementiterator on the elem.data() 
+                    // and iterate over the entities if they are there
+                    // adding them to our entity collection
+                    /*
+                    XmlElementIterator entityIter(elem.data());
+                    while (entityIter.next())
+                    {
+                        const XmlElement& entityElem = *entityIter;
+						if (entityElem.isEntityDeclaration())
+						{
+                            ByteSpan name;
+                            ByteSpan value;
+                            ByteSpan content = chunk_ltrim(entityElem.data(), xmlwsp);
+
+
+                            // Get the name of the entity
+                            name = chunk_token(content, xmlwsp);
+
+                            // Skip past the whitespace
+                            content = chunk_ltrim(content, xmlwsp);
+
+							// Get the value of the entity
+                            readQuoted(content, value);
+
+
+							if (name && value)
+							{
+								addEntity(name, value);
+							}
+						}
+                    }
+                    */
+				}
+                else {
+                    //printf("SVGDocument.loadFromXmlIterator : ERROR - unexpected element: %s\n", toString(elem.tagName()).c_str());
+                    //printChunk(elem.data());
                 }
             }
         }
 
+        
+        
 		// Assuming we've already got a file mapped into memory, load the document
-        //bool loadFromChunk(const ByteSpan &srcChunk)
-        //{
-        //    XmlElementIterator iter(srcChunk, true);
+        bool loadFromChunk(const ByteSpan &srcChunk, FontHandler* fh)
+        {
+            // create a memBuff from srcChunk
+            // since we use memory references, we need
+            // to keep the memory around for the duration of the 
+            // document's life
+            fSourceMem.initFromSpan(srcChunk);
+            
+			// Create the XML Iterator we're going to use to parse the document
+            XmlElementIterator iter(fSourceMem.span(), true);
 
-        //    loadFromXmlIterator(iter);
+            loadFromXmlIterator(iter, this);
+            
+            // render into a blank context to get sizing
+            IRenderSVG actx(fh);
+            actx.setContainerFrame(BLRect(0, 0, 640, 480));
+            draw(&actx, this);
+            
+            return true;
+        }
 
-        //    return true;
-        //}
 
+        /*
         // A convenience to construct the document from a chunk, and return
         // a shared pointer to the document
-        static std::shared_ptr<SVGDocument> createFromChunk(const ByteSpan& srcChunk, FontHandler* fh)
+        static std::shared_ptr<SVGDocument> createFromChunk(const ByteSpan& srcChunk, FontHandler* fh, const double w, const double h, const double ppi)
         {
-            auto doc = std::make_shared<SVGDocument>(fh);
-
-            XmlElementIterator iter(srcChunk, true);
-            doc->loadFromXmlIterator(iter);
-            
-            //doc->loadFromChunk(srcChunk);
+            auto doc = std::make_shared<SVGDocument>(fh, w, h, ppi);
+            if (!doc->loadFromChunk(srcChunk, fh))
+                return {};
 
             return doc;
         }
-        
+        */
     };
+
+    using SVGDocumentHandle = std::shared_ptr<SVGDocument>;
+
 }
 
-namespace waavs {
-    struct SVGFactory
-    {
-        SVGFactory()
-        {
-            // Register attributes
-            //SVGClipPathAttribute::registerFactory();
-			SVGFillPaint::registerFactory();
-            SVGFillOpacity::registerFactory();
-            
-            SVGFillRule::registerFactory();
-            
-            //SVGFontFamily::registerFactory();
-            //SVGFontSize::registerFactory();
-            
-			SVGMarkerAttribute::registerMarkerFactory();
 
-            
-            SVGOpacity::registerFactory();
-            
-            SVGRawAttribute::registerFactory();
-            
-            SVGStrokeLineCap::registerFactory();
-            SVGStrokeLineJoin::registerFactory();
-            SVGStrokeMiterLimit::registerFactory();
-            SVGStrokeWidth::registerFactory();
-            
-            SVGStrokePaint::registerFactory();
-			SVGStrokeOpacity::registerFactory();
-            
-			SVGTextAnchor::registerFactory();
-            
-            //SVGTransform::registerFactory();
-            
-            SVGVectorEffectAttribute::registerFactory();
-            
-            // Register shape nodes
-            SVGCircleElement::registerFactory();               // 'circle'
-			SVGEllipseElement::registerFactory();              // 'ellipse'
-            SVGLineElement::registerFactory();                 // 'line'
-            SVGPolygonElement::registerFactory();              // 'polygon'
-			SVGPolylineElement::registerFactory();             // 'polyline'
-			SVGPathElement::registerFactory();                 // 'path'
-            SVGRectElement::registerFactory();                 // 'rect'
-
-            // Register Structural nodes
-			SVGAElement::registerFactory();             // 'a'
-            SVGGElement::registerFactory();             // 'g'
-            SVGImageNode::registerFactory();            // 'image'
-            SVGSVGElement::registerFactory();           // 'svg'
-            SVGStyleNode::registerFactory();            // 'style'
-            SVGSwitchElement::registerFactory();        // 'switch'
-            SVGTextNode::registerFactory();             // 'text'
-            SVGTSpanNode::registerFactory();            // 'tspan'
-            SVGUseElement::registerFactory();           // 'use'
-            
-            // Non-Structural Nodes
-			SVGSolidColorElement::registerFactory();    // 'solidColor'
-            SVGClipPath::registerFactory();             // 'clipPath'
-            SVGDefsNode::registerFactory();             // 'defs'
-            SVGConicGradient::registerFactory();        // 'conicGradient'
-            SVGLinearGradient::registerFactory();       // 'linearGradient'
-            SVGMarkerNode::registerFactory();           // 'marker'
-            SVGMaskNode::registerFactory();             // 'mask'
-            SVGPatternNode::registerFactory();          // 'pattern'
-            SVGRadialGradient::registerFactory();       // 'radialGradient'
-            SVGSymbolNode::registerFactory();           // 'symbol'
-
-            
-            // Filter node registrations
-            SVGFilterElement::registerFactory();            // 'filter'
-            SVGFeBlendElement::registerFactory();           // 'feBlend'
-            SVGFeColorMatrixElement::registerFactory();     // 'feColorMatrix'
-            SVGFeCompositeElement::registerFactory();       // 'feComposite'
-            SVGFeConvolveMatrixElement::registerFactory();  // 'feConvolveMatrix'
-            SVGFeDiffuseLightingElement::registerFactory(); // 'feDiffuseLighting'
-            SVGFeDisplacementMapElement::registerFactory(); // 'feDisplacementMap'
-            SVGFeDistantLightElement::registerFactory();    // 'feDistantLightMap'
-            SVGFeFloodElement::registerFactory();           // 'feFlood'
-            SVGFeGaussianBlurElement::registerFactory();    // 'feGaussianBlur'
-            SVGFeOffsetElement::registerFactory();          // 'feOffset'
-            SVGFeTurbulenceElement::registerFactory();      // 'feTurbulence'
-            
-            
-            // Font node registrations
-            // These are obsolete and deprecated
-			SVGFontNode::registerFactory();             // 'font'
-			SVGFontFaceNode::registerFactory();         // 'font-face'
-            SVGGlyphNode::registerFactory();            // 'glyph'
-			SVGMissingGlyphNode::registerFactory();     // 'missing-glyph'
-			SVGFontFaceNameNode::registerFactory();     // 'font-face-name'
-			SVGFontFaceSrcNode::registerFactory();      // 'font-face-src'
-
-            // Miscellaneous
-            SVGDescNode::registerFactory();             // 'desc'
-            SVGTitleNode::registerFactory();            // 'title'
-
-
-        }
-
-    };
-}

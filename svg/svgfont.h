@@ -11,8 +11,11 @@
 #include "svgcss.h"
 
 
-
-
+//
+// SVG Supports embedded fonts.  This feature is little used, and obsolete
+// as web fonts, and truetype fonts are the norm.  The support here is experimental
+// as there's no real way of adding this information in this form into blend2d
+//
 
 namespace waavs {
 	enum GLYPH_ORIENTATION {
@@ -36,55 +39,42 @@ namespace waavs {
 	{
 		static void registerFactory()
 		{
-			gSVGGraphicsElementCreation["font"] = [](IAmGroot* aroot, XmlElementIterator& iter) {
-				auto node = std::make_shared<SVGFontNode>(aroot);
-				node->loadFromXmlIterator(iter);
+			getSVGContainerCreationMap()["font"] = [](IAmGroot* groot, XmlElementIterator& iter) {
+				auto node = std::make_shared<SVGFontNode>(groot);
+				node->loadFromXmlIterator(iter, groot);
 				node->visible(false);
 
 				return node;
-			};
+				};
 		}
 
 		// id
-		double fHorizAdvX;
-		double fHorizOriginX;
-		double fHorizOriginY;
-		double fVertAdvY;
-		double fVertOriginX;
-		double fVertOriginY;
+		double fHorizAdvX{ 0 };
+		double fHorizOriginX{ 0 };
+		double fHorizOriginY{ 0 };
+		double fVertAdvY{ 0 };
+		double fVertOriginX{ 0 };
+		double fVertOriginY{ 0 };
 
-		SVGFontNode(IAmGroot* aroot)
-			: SVGGraphicsElement(aroot)
+		SVGFontNode(IAmGroot* )
+			: SVGGraphicsElement()
+			, fHorizAdvX{ 0 }
+			, fHorizOriginX{0}
 		{
 			isStructural(false);
 		}
 
-		void loadSelfFromXmlElement(const XmlElement& elem) override
+
+		void bindSelfToContext(IRenderSVG* ctx, IAmGroot* groot) override
 		{
-			SVGGraphicsElement::loadSelfFromXmlElement(elem);
 
 
-			// get horiz-adv-x as a numeric value if it exists
-			auto horizAdvX = getAttribute("horiz-adv-x");
-			auto horizOriginX = getAttribute("horiz-origin-x");
-			auto horizOriginY = getAttribute("horiz-origin-y");
-			auto vertAdvY = getAttribute("vert-adv-y");
-			auto vertOriginX = getAttribute("vert-origin-x");
-			auto vertOriginY = getAttribute("vert-origin-y");
-
-
-			if (horizAdvX)
-				fHorizAdvX = toNumber(horizAdvX);
-			if (horizOriginX)
-				fHorizOriginX = toNumber(horizOriginX);
-			if (horizOriginY)
-				fHorizOriginY = toNumber(horizOriginY);
-			if (vertAdvY)
-				fVertAdvY = toNumber(vertAdvY);
-			if (vertOriginX)
-				fVertOriginX = toNumber(vertOriginX);
-			if (vertOriginY)
-				fVertOriginY = toNumber(vertOriginY);
+			parseNumber(getAttribute("horiz-adv-x"), fHorizAdvX);
+			parseNumber(getAttribute("horiz-origin-x"), fHorizOriginX);
+			parseNumber(getAttribute("horiz-origin-y"), fHorizOriginY);
+			parseNumber(getAttribute("vert-adv-y"), fVertAdvY);
+			parseNumber(getAttribute("vert-origin-x"), fVertOriginX);
+			parseNumber(getAttribute("vert-origin-y"), fVertOriginY);
 
 
 			needsBinding(true);
@@ -100,9 +90,9 @@ namespace waavs {
 	{
 		static void registerSingularNode()
 		{
-			gShapeCreationMap["font-face"] = [](IAmGroot* aroot, const XmlElement& elem) {
-				auto node = std::make_shared<SVGFontFaceNode>(aroot);
-				node->loadFromXmlElement(elem);
+			getSVGSingularCreationMap()["font-face"] = [](IAmGroot* groot, const XmlElement& elem) {
+				auto node = std::make_shared<SVGFontFaceNode>(groot);
+				node->loadFromXmlElement(elem, groot);
 				node->visible(false);
 
 				return node;
@@ -111,9 +101,9 @@ namespace waavs {
 
 		static void registerFactory()
 		{
-			gSVGGraphicsElementCreation["font-face"] = [](IAmGroot* aroot, XmlElementIterator& iter) {
-				auto node = std::make_shared<SVGFontFaceNode>(aroot);
-				node->loadFromXmlIterator(iter);
+			getSVGContainerCreationMap()["font-face"] = [](IAmGroot* groot, XmlElementIterator& iter) {
+				auto node = std::make_shared<SVGFontFaceNode>(groot);
+				node->loadFromXmlIterator(iter, groot);
 				node->visible(false);
 
 				return node;
@@ -156,11 +146,12 @@ namespace waavs {
 		std::string fOverlinePosition;
 		std::string fOverlineThickness;
 
-		SVGFontFaceNode(IAmGroot* iMap) :SVGGraphicsElement(iMap) {}
+		SVGFontFaceNode(IAmGroot* iMap) :SVGGraphicsElement() {}
 
-		void loadSelfFromXmlElement(const XmlElement& elem) override
+
+		void bindSelfToContext(IRenderSVG* ctx, IAmGroot* groot) override
 		{
-			SVGGraphicsElement::loadSelfFromXmlElement(elem);
+
 
 			auto fontFamily = getAttribute("font-family");
 			auto fontStyle = getAttribute("font-style");
@@ -184,9 +175,9 @@ namespace waavs {
 	{
 		static void registerSingularNode()
 		{
-			gShapeCreationMap["missing-glyph"] = [](IAmGroot* aroot, const XmlElement& elem) {
-				auto node = std::make_shared<SVGMissingGlyphNode>(aroot);
-				node->loadFromXmlElement(elem);
+			getSVGSingularCreationMap()["missing-glyph"] = [](IAmGroot* groot, const XmlElement& elem) {
+				auto node = std::make_shared<SVGMissingGlyphNode>(groot);
+				node->loadFromXmlElement(elem, groot);
 
 				return node;
 			};
@@ -194,9 +185,9 @@ namespace waavs {
 
 		static void registerFactory()
 		{
-			gSVGGraphicsElementCreation["missing-glyph"] = [](IAmGroot* aroot, XmlElementIterator& iter) {
-				auto node = std::make_shared<SVGMissingGlyphNode>(aroot);
-				node->loadFromXmlIterator(iter);
+			getSVGContainerCreationMap()["missing-glyph"] = [](IAmGroot* groot, XmlElementIterator& iter) {
+				auto node = std::make_shared<SVGMissingGlyphNode>(groot);
+				node->loadFromXmlIterator(iter, groot);
 
 				return node;
 			};
@@ -210,36 +201,25 @@ namespace waavs {
 		double fVertOriginY{ 0 };
 		BLPath fPath{};
 		
-		SVGMissingGlyphNode(IAmGroot* aroot)
-			: SVGGraphicsElement(aroot)
+		SVGMissingGlyphNode(IAmGroot* )
+			: SVGGraphicsElement()
 		{
 		}
 
-		void loadSelfFromXmlElement(const XmlElement& elem) override
-		{
-			SVGGraphicsElement::loadSelfFromXmlElement(elem);
-
-			auto horizAdvX = getAttribute("horiz-adv-x");
-			auto vertAdvY = getAttribute("vert-adv-y");
-			auto vertOriginX = getAttribute("vert-origin-x");
-			auto vertOriginY = getAttribute("vert-origin-y");
+		void bindSelfToContext(IRenderSVG* ctx, IAmGroot* groot) override
+		{	
+			parseNumber(getAttribute("horiz-adv-x"), fHorizAdvX);
+			parseNumber(getAttribute("vert-adv-y"), fVertAdvY);
+			parseNumber(getAttribute("vert-origin-x"), fVertOriginX);
+			parseNumber(getAttribute("vert-origin-y"), fVertOriginY);
 			
-			if (horizAdvX)
-				fHorizAdvX = toNumber(horizAdvX);
-			if (vertAdvY)
-				fVertAdvY = toNumber(vertAdvY);
-			if (vertOriginX)
-				fVertOriginX = toNumber(vertOriginX);
-			if (vertOriginY)
-				fVertOriginY = toNumber(vertOriginY);
 			
-
 			auto d = getAttribute("d");
 			if (!d)
 				return;
 
-			auto success = blpathparser::parsePath(d, fPath);
-			fPath.shrink();
+			if (blpathparser::parsePath(d, fPath))
+				fPath.shrink();
 
 			needsBinding(false);
 		}
@@ -249,12 +229,13 @@ namespace waavs {
 	// SVGGlyph
 	// Support the 'glyph' found in the 'font' element
 	//====================================
-	struct SVGGlyphNode : public SVGGeometryElement
+	struct SVGGlyphNode : public SVGPathBasedGeometry
 	{
 		static void registerFactory() {
-			gShapeCreationMap["glyph"] = [](IAmGroot* root, const XmlElement& elem) {
-				auto node = std::make_shared<SVGGlyphNode>(root);
-				node->loadFromXmlElement(elem);
+			getSVGSingularCreationMap()["glyph"] = [](IAmGroot* groot, const XmlElement& elem) {
+				auto node = std::make_shared<SVGGlyphNode>(groot);
+				node->loadFromXmlElement(elem, groot);
+				
 				return node;
 			};
 		}
@@ -270,38 +251,29 @@ namespace waavs {
 		GLYPH_ARABIC_FORM arabicForm{ GLYPH_ARABIC_FORM_ISOLATED };
 		ByteSpan fLang{};
 
-		SVGGlyphNode(IAmGroot* iMap) :SVGGeometryElement(iMap) {}
+		SVGGlyphNode(IAmGroot* iMap) :SVGPathBasedGeometry(iMap) {}
 
-		void loadSelfFromXmlElement(const XmlElement& elem) override
+		void bindSelfToContext(IRenderSVG* ctx, IAmGroot* groot) override
 		{
-			SVGGeometryElement::loadSelfFromXmlElement(elem);
+			//SVGGeometryElement::loadSelfFromXmlElement(elem, groot);
 
 			// load unicode property
 			// just store the raw ByteSpan
 			// and let the caller parse it
 			auto uni = getAttribute("unicode");
-			auto horizAdvX = getAttribute("horiz-adv-x");
-			auto vertAdvY = getAttribute("vert-adv-y");
-			auto vertOriginX = getAttribute("vert-origin-x");
-			auto vertOriginY = getAttribute("vert-origin-y");
 			
-			if (horizAdvX)
-				fHorizAdvX = toNumber(horizAdvX);
-			if (vertAdvY)
-				fVertAdvY = toNumber(vertAdvY);
-			if (vertOriginX)
-				fVertOriginX = toNumber(vertOriginX);
-			if (vertOriginY)
-				fVertOriginY = toNumber(vertOriginY);
+			parseNumber(getAttribute("horiz-adv-x"), fHorizAdvX);
+			parseNumber(getAttribute("vert-adv-y"), fVertAdvY);
+			parseNumber(getAttribute("vert-origin-x"), fVertOriginX);
+			parseNumber(getAttribute("vert-origin-y"), fVertOriginY);
+			
 			
 			auto d = getAttribute("d");
 			if (!d)
 				return;
 
-			auto success = blpathparser::parsePath(d, fPath);
-			fPath.shrink();
-
-			needsBinding(false);
+			if (blpathparser::parsePath(d, fPath))
+				fPath.shrink();
 		}
 
 	};
@@ -314,9 +286,9 @@ namespace waavs {
 	{
 		static void registerSingularNode()
 		{
-			gShapeCreationMap["font-face-src"] = [](IAmGroot* aroot, const XmlElement& elem) {
-				auto node = std::make_shared<SVGFontFaceSrcNode>(aroot);
-				node->loadFromXmlElement(elem);
+			getSVGSingularCreationMap()["font-face-src"] = [](IAmGroot* groot, const XmlElement& elem) {
+				auto node = std::make_shared<SVGFontFaceSrcNode>(groot);
+				node->loadFromXmlElement(elem, groot);
 
 				return node;
 			};
@@ -324,9 +296,9 @@ namespace waavs {
 
 		static void registerFactory()
 		{
-			gSVGGraphicsElementCreation["font-face-src"] = [](IAmGroot* aroot, XmlElementIterator& iter) {
-				auto node = std::make_shared<SVGFontFaceSrcNode>(aroot);
-				node->loadFromXmlIterator(iter);
+			getSVGContainerCreationMap()["font-face-src"] = [](IAmGroot* groot, XmlElementIterator& iter) {
+				auto node = std::make_shared<SVGFontFaceSrcNode>(groot);
+				node->loadFromXmlIterator(iter, groot);
 
 				return node;
 			};
@@ -335,36 +307,34 @@ namespace waavs {
 		}
 
 
-		SVGFontFaceSrcNode(IAmGroot* iMap) :SVGGraphicsElement(iMap) {}
+		SVGFontFaceSrcNode(IAmGroot* iMap) :SVGGraphicsElement() {}
 
 	};
 	
 	//=========================================================
 	// SVGFontFaceNameNode
 	//=========================================================
-	struct SVGFontFaceNameNode : public SVGVisualNode
+	struct SVGFontFaceNameNode : public SVGGraphicsElement
 	{
 		static void registerFactory() {
-			gShapeCreationMap["font-face-name"] = [](IAmGroot* root, const XmlElement& elem) {
-				auto node = std::make_shared<SVGFontFaceNameNode>(root);
-				node->loadFromXmlElement(elem);
+			getSVGSingularCreationMap()["font-face-name"] = [](IAmGroot* groot, const XmlElement& elem) {
+				auto node = std::make_shared<SVGFontFaceNameNode>(groot);
+				node->loadFromXmlElement(elem, groot);
 				return node;
 			};
 		}
 
-		std::string fFaceName{};
+		ByteSpan fFaceName{};
 
-		SVGFontFaceNameNode(IAmGroot* iMap) :SVGVisualNode(iMap) { visible(false); }
+		SVGFontFaceNameNode(IAmGroot* iMap) :SVGGraphicsElement() { visible(false); }
 
-		const std::string& faceName() const {
+		const ByteSpan& faceName() const {
 			return fFaceName;
 		}
 		
-		void loadSelfFromXmlElement(const XmlElement& elem) override
+		void bindSelfToContext(IRenderSVG* ctx, IAmGroot* ) override
 		{
-			auto aname = getAttribute("name");
-			if (aname)
-				fFaceName = toString(aname);
+			fFaceName = getAttribute("name");
 		}
 
 

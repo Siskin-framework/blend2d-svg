@@ -20,7 +20,13 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="xmlutil.h">
+    <ClInclude Include="..\..\svg\xmlscan.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\app\mappedfile.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\app\xmlutil.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

@@ -58,24 +58,33 @@ public:
 
     }
 
-    int getLastError() {return fLastError;}
-    int getWidth() {return fSize.cx;}
-    int getHeight() {return fSize.cy;}
+    // an alpha value of 255 means we'll use the per pixel alpha
+    // values.  Anything less than this, and we'll use the specified
+    // value for the whole window, rather than doing per  pixel
+    // alpha blending.
+    void setGlobalAlpha(BYTE alpha)
+    {
+        fBlendFunction.SourceConstantAlpha = alpha;
+    }
+    
+    int getLastError() const {return fLastError;}
+    int getWidth() const {return fSize.cx;}
+    int getHeight() const {return fSize.cy;}
 
-
+    // Called when the window is supposed to display itself
     bool display(HWND win, HDC source)
     {
         fInfo.hdcSrc = source;
         RECT wRect;
-        BOOL bResult = GetWindowRect(win, &wRect);
+        BOOL bResult = ::GetWindowRect(win, &wRect);
         
         fWindowPosition.x = wRect.left;
         fWindowPosition.y = wRect.top;
         
-        bResult = UpdateLayeredWindowIndirect(win, &fInfo);
+        bResult = ::UpdateLayeredWindowIndirect(win, &fInfo);
 
         if (!bResult) {
-            fLastError = GetLastError();
+            fLastError = ::GetLastError();
             return false;
         }
 

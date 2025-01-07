@@ -9,7 +9,7 @@
 	topics, that other modules can subscribe to.
 
 	A 'main()' is provided, so a compiled application has a minimal runtime environment
-	when it starts.  The user's app can implement a 'setup()' function,
+	when it starts.  The user's app can implement a 'onLoad()' function,
 	and not have to worry about whether it is a console or Window target.
 
 	All other aspects of the application are up to the application environment,
@@ -59,7 +59,7 @@
 
 
 
-#include "blend2d/blend2d.h"
+#include "blend2d.h"
 
 #include "maths.h"
 #include "pubsub.h"
@@ -88,7 +88,6 @@ APP_EXPORT extern int gargc;
 APP_EXPORT extern char **gargv;
 APP_EXPORT extern unsigned int gSystemThreadCount;
 
-APP_EXPORT extern waavs::User32Window * gAppWindow;
 
 
 // Keyboard Globals
@@ -109,10 +108,10 @@ APP_EXPORT extern float rawMouseX;
 APP_EXPORT extern float rawMouseY;
 
 // Globals we expect the user to consume
-APP_EXPORT extern int displayWidth;
-APP_EXPORT extern int displayHeight;
-APP_EXPORT extern unsigned int systemDpi;
-APP_EXPORT extern unsigned int systemPpi;
+APP_EXPORT extern int rawPixelWidth;
+APP_EXPORT extern int rawPixelHeight;
+APP_EXPORT extern unsigned int physicalDpi;
+//APP_EXPORT extern unsigned int systemDpi;
 
 APP_EXPORT extern int canvasWidth;
 APP_EXPORT extern int canvasHeight;
@@ -127,11 +126,12 @@ APP_EXPORT extern size_t canvasStride;
 // 
 // The control the lifetime of the environment, creation of primary window
 // and whether various parts of the IO system are present
-APP_EXPORT waavs::User32PixelMap& appFrameBuffer();
+APP_EXPORT waavs::User32PixelMap* appFrameBuffer();
+APP_EXPORT waavs::User32Window * getAppWindow();
 
 
 APP_EXPORT void createAppWindow(long aWidth, long aHeight, const char* title);
-APP_EXPORT void windowTitle(const char* title);
+APP_EXPORT void setWindowTitle(const char* title);
 APP_EXPORT void windowOpacity(float o);	// set overall opacity of window
 APP_EXPORT void showAppWindow();
 APP_EXPORT void halt();
@@ -150,7 +150,7 @@ APP_EXPORT void layered();
 APP_EXPORT void noLayered();
 APP_EXPORT bool isLayered();
 
-APP_EXPORT void getKeyStates();
+APP_EXPORT void refreshKeyStates();
 
 // turn raw input on and off
 APP_EXPORT void rawInput();
@@ -216,16 +216,16 @@ extern "C" {
 // Make Topic publishers available
 // Doing C++ pub/sub
 // These are only accessible through the C++ interface
-using SignalEventTopic = Topic<intptr_t>; 
-using MouseEventTopic = Topic<waavs::MouseEvent&>;				// Mouse events
-using KeyboardEventTopic = Topic<waavs::KeyboardEvent&>;		// Keyboard events
-using JoystickEventTopic = Topic<waavs::JoystickEvent&>;		// Joystick events
-using FileDropEventTopic = Topic<waavs::FileDropEvent&>;		// File drop events
-using TouchEventTopic = Topic<waavs::TouchEvent&>;				// Touch events
-using PointerEventTopic = Topic<waavs::PointerEvent&>;			// Pointer events
-using GestureEventTopic = Topic<waavs::GestureEvent&>;			// Gesture events
-using FrameCountEventTopic = Topic<waavs::FrameCountEvent&>;	// Timed Frame count events
-using ResizeEventTopic = Topic<waavs::ResizeEvent&>;			// Application Window Resize events	
+using SignalEventTopic = waavs::Topic<intptr_t>; 
+using MouseEventTopic = waavs::Topic<waavs::MouseEvent>;				// Mouse events
+using KeyboardEventTopic = waavs::Topic<waavs::KeyboardEvent>;		// Keyboard events
+using JoystickEventTopic = waavs::Topic<waavs::JoystickEvent>;		// Joystick events
+using FileDropEventTopic = waavs::Topic<waavs::FileDropEvent>;		// File drop events
+using TouchEventTopic = waavs::Topic<waavs::TouchEvent>;				// Touch events
+using PointerEventTopic = waavs::Topic<waavs::PointerEvent>;			// Pointer events
+using GestureEventTopic = waavs::Topic<waavs::GestureEvent>;			// Gesture events
+using FrameCountEventTopic = waavs::Topic<waavs::FrameCountEvent>;	// Timed Frame count events
+using ResizeEventTopic = waavs::Topic<waavs::ResizeEvent>;			// Application Window Resize events	
 
 
 APP_EXPORT void subscribe(SignalEventTopic::Subscriber s);

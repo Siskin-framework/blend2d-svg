@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <cstring>
 #include <cstdint>
+#include <memory>
 
 namespace waavs {
     // User32Window 
@@ -33,7 +34,8 @@ namespace waavs {
         HWND fHandle;
         WNDCLASSEXA fClass{};
         bool fMouseInside = false;
-
+        LONG fLastWindowStyle{};
+        
         // Constructor taking an already allocated
         // window handle.  Use a WindowKind to allocate
         // an instance of a particular kind of window
@@ -48,10 +50,12 @@ namespace waavs {
             DestroyWindow(fHandle);
         }
 
-        HWND getHandle() { return fHandle; }
-
+        //HWND getHandle() const { return fHandle; }
+        HWND windowHandle() const { return fHandle; }
+		void setWindowHandle(HWND handle) { fHandle = handle; }
+        
         // All the methods that are useful
-        bool isValid() { return fHandle != NULL; }
+        bool isValid() const { return fHandle != NULL; }
 
         // Hide the window
         void hide()
@@ -68,15 +72,16 @@ namespace waavs {
         int getWidth()
         {
             RECT wRect;
-            BOOL bResult = ::GetWindowRect(fHandle, &wRect);
+            ::GetWindowRect(fHandle, &wRect);
             int cx = wRect.right - wRect.left;
+            
             return cx;
         }
 
         int getHeight()
         {
             RECT wRect;
-            BOOL bResult = GetWindowRect(fHandle, &wRect);
+            ::GetWindowRect(fHandle, &wRect);
             int cy = wRect.bottom - wRect.top;
 
             return cy;
@@ -97,7 +102,7 @@ namespace waavs {
         {
             // Get current size of window
             RECT wRect;
-            BOOL bResult = ::GetWindowRect(fHandle, &wRect);
+            ::GetWindowRect(fHandle, &wRect);
 
             // Set the new size of the window based on the client area
             RECT cRect = { 0,0,awidth,aheight };
@@ -111,7 +116,7 @@ namespace waavs {
             int cy = cRect.bottom - cRect.top;
             UINT uFlags = 0;
 
-            ::SetWindowPos(getHandle(), hWndInsertAfter, X, Y, cx, cy, uFlags);
+            ::SetWindowPos(windowHandle(), hWndInsertAfter, X, Y, cx, cy, uFlags);
 
         }
 
@@ -121,7 +126,8 @@ namespace waavs {
             if (title == nullptr)
                 return false;
 
-            BOOL res = ::SetWindowTextA(getHandle(), title);
+            BOOL res = ::SetWindowTextA(windowHandle(), title);
+            
             return res != 0;
         }
 
@@ -134,7 +140,8 @@ namespace waavs {
         // Set a style bit
         LONG setWindowStyle(int style)
         {
-            return SetWindowLongA(fHandle, GWL_STYLE, style);
+            auto res = ::SetWindowLongA(fHandle, GWL_STYLE, style);
+            return res;
         }
 
         // Remove a specific style bit, or set of bits
@@ -187,6 +194,35 @@ namespace waavs {
 
             return 0;
         }
+
+        bool setLayered(bool layered)
+        {
+            if (layered) {
+                addExtendedStyle(WS_EX_LAYERED | WS_EX_NOREDIRECTIONBITMAP);
+                fLastWindowStyle = setWindowStyle(WS_POPUP);
+            }
+            else {
+                removeExtendedStyle(WS_EX_LAYERED | WS_EX_NOREDIRECTIONBITMAP);
+                setWindowStyle(fLastWindowStyle);
+            }
+            
+            // Call this to ensure Windows actually updates the attributes
+            // before moving on
+            ::SetWindowPos(fHandle, 0, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+            
+            return true;
+        }
+        
+        int setNonLayered()
+        {
+            // Call this to ensure Windows actually updates the attributes
+            // before moving on
+            ::SetWindowPos(fHandle, 0, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        }
+
+
     };
 
 
@@ -196,7 +232,9 @@ namespace waavs {
     // Window Classes, and do that registration.  As well,
     // it makes it relatively easy to create instances
     // of classes.
-    class User32WindowClass {
+    struct User32WindowClass 
+    {
+    protected:
         WNDCLASSEXA fWndClass{};      // data structure holding class information
         bool fIsRegistered{};
         int fLastError{};
@@ -213,7 +251,7 @@ namespace waavs {
             // In this case, we're essentially doing a lookup
             // The classOrAtom is either a pointer to a string
             // or it's an unsigned uint16
-            memset(&fWndClass, 0, sizeof(WNDCLASSEXA));
+            memset(&fWndClass, 0, sizeof(fWndClass));
 
             BOOL bResult = GetClassInfoExA(GetModuleHandleA(NULL), classOrAtom, &fWndClass);
             if (bResult == 0) {
@@ -241,7 +279,7 @@ namespace waavs {
             fClassName = _strdup(className);
 
             memset(&fWndClass, 0, sizeof(fWndClass));
-            fWndClass.cbSize = sizeof(WNDCLASSEXA);
+            fWndClass.cbSize = sizeof(fWndClass);
             fWndClass.hInstance = GetModuleHandleA(NULL);
             fWndClass.lpszClassName = fClassName;
             fWndClass.lpfnWndProc = wndProc;
@@ -271,11 +309,10 @@ namespace waavs {
         int getLastError() const { return fLastError; }
         const char* getName() const { return fWndClass.lpszClassName; }
 
-        User32Window* createWindow(const char* title, int width, int height, int style = WS_OVERLAPPEDWINDOW, int xstyle = 0, WNDPROC handler = nullptr)
+        virtual User32Window* createWindow(const char* title, int width, int height, int style = WS_OVERLAPPEDWINDOW, int xstyle = 0, WNDPROC handler = nullptr)
         {
-            if (!isValid()) {
-                return nullptr;
-            }
+            if (!isValid())
+                return {};
 
             HMODULE hInst = fWndClass.hInstance;
 
@@ -296,13 +333,17 @@ namespace waavs {
                 fWndClass.hInstance,
                 NULL);
 
-            if (winHandle == nullptr) {
-                return nullptr;
-            }
-
-            User32Window* win = new User32Window(winHandle);
-
-            return win;
+            if (winHandle == nullptr) 
+                return {};
+            
+			auto win = new User32Window(winHandle);
+            
+            // store the pointer to the class inside the window handle
+			::SetWindowLongPtr(winHandle, GWLP_USERDATA, (LONG_PTR)win);
+            
+			return win;
         }
     };
 }
+
+

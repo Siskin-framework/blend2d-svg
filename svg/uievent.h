@@ -6,7 +6,7 @@
 
 #include <vector>
 #include <string>
-#include <functional>
+
 
 
 #include "maths.h"
@@ -14,7 +14,7 @@
 
 namespace waavs {
     // Basic type to encapsulate a mouse event
-    enum {
+    enum MouseActivityKind {
         // These are based on regular events
         MOUSEMOVED,
         MOUSEPRESSED,
@@ -54,7 +54,7 @@ namespace waavs {
     };
 
     // Keyboard interactions
-    enum {
+    enum KeyboardActivityKind {
         KEYPRESSED,
         KEYRELEASED,
         KEYTYPED
@@ -71,7 +71,7 @@ namespace waavs {
     };
 
     // Touch interactions
-    enum {
+    enum touchActivityKind {
         TOUCH_DOWN,
         TOUCH_UP,
         TOUCH_MOVE,
@@ -102,7 +102,7 @@ namespace waavs {
         bool isPen;
     };
 
-    enum {
+    enum GestureActivityKind {
         GESTURE_BEGIN = 1,
         GESTURE_END = 2,
         GESTURE_ZOOM = 3,
@@ -148,7 +148,7 @@ namespace waavs {
     };
 
     // For joystick activity
-    enum {
+    enum JoystickActivityKind {
         JOYPRESSED,
         JOYRELEASED,
         JOYMOVED,
@@ -174,8 +174,8 @@ namespace waavs {
 
     struct FrameCountEvent
     {
-        double seconds;
-        uint64_t frameCount;
+        double seconds;         // Relative to application start time
+        uint64_t frameCount;    // Since application start
     };
 
     struct ResizeEvent
@@ -183,87 +183,6 @@ namespace waavs {
 		size_t width;
 		size_t height;
 	};
-    
-    // A kind of mini pub-sub for specific events
-
-    struct KeyboardEventDispatch
-    {
-        std::function<void(const KeyboardEvent& e)> keyPressed = nullptr;
-        std::function<void(const KeyboardEvent& e)> keyReleased = nullptr;
-        std::function<void(const KeyboardEvent& e)> keyTyped = nullptr;
-
-        void operator()(const KeyboardEvent& e)
-        {
-
-            switch (e.activity)
-            {
-            case KEYPRESSED:
-                if (keyPressed != nullptr)
-                    keyPressed(e);
-                break;
-
-            case KEYRELEASED:
-                if (keyReleased != nullptr)
-                    keyReleased(e);
-                break;
-
-            case KEYTYPED:
-                if (keyTyped != nullptr)
-                    keyTyped(e);
-                break;
-            }
-
-        }
-    };
-
-    // A functor for dispatching mouse events
-    struct MouseEventDispatch
-    {
-        std::function<void(const MouseEvent& e)> mousePressed = nullptr;
-        std::function<void(const MouseEvent& e)> mouseReleased = nullptr;
-        std::function<void(const MouseEvent& e)> mouseClicked = nullptr;
-        std::function<void(const MouseEvent& e)> mouseDragged = nullptr;
-        std::function<void(const MouseEvent& e)> mouseMoved = nullptr;
-        std::function<void(const MouseEvent& e)> mouseWheel = nullptr;
-        std::function<void(const MouseEvent& e)> mouseHWheel = nullptr;
-
-        void operator()(const MouseEvent& e)
-        {
-            switch (e.activity)
-            {
-            case MOUSEDRAGGED:
-                if (mouseDragged != nullptr)
-                    mouseDragged(e);
-                break;
-
-            case MOUSEPRESSED:
-                if (mousePressed != nullptr)
-                    mousePressed(e);
-                break;
-
-            case MOUSEMOVED:
-                if (mouseMoved != nullptr)
-                    mouseMoved(e);
-                break;
-
-            case MOUSERELEASED:
-                if (mouseReleased != nullptr)
-                    mouseReleased(e);
-                break;
-
-            case MOUSEWHEEL:
-                if (mouseWheel != nullptr)
-                    mouseWheel(e);
-                break;
-
-            case MOUSEHWHEEL:
-                if (mouseHWheel != nullptr)
-                    mouseHWheel(e);
-                break;
-            }
-
-        }
-    };
 
 }
 

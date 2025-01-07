@@ -15,13 +15,28 @@
 
 #include <cstdint>		// uint8_t, etc
 #include <cstddef>		// nullptr_t, ptrdiff_t, size_t
+#include <cctype>
 
 #define WAAVS_NOMINMAX 1
 
+
+
+
 #ifdef _MSC_VER
+#ifndef INLINE
 #define INLINE __forceinline
+#endif
+#ifndef unlikely
+#define unlikely(x) x
+#endif // unlikely
 #else
-#define INLINE static inline
+#ifndef INLINE
+#define INLINE __attribute__((always_inline)) inline
+#endif // really_inline
+
+#ifndef unlikely
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#endif // unlikely
 #endif
 
 // MSVC++ has #defines for min/max that break various things
@@ -35,10 +50,5 @@
     #endif
 #endif
 
-namespace waavs 
-{
-    // Determine at runtime if the CPU is little-endian (intel standard)
-    static INLINE bool isLE() noexcept {int i = 1; return (int)*((unsigned char*)&i) == 1;}
-    static INLINE bool isBE() noexcept { return !isLE(); }
-}
+
 
